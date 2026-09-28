@@ -225,7 +225,7 @@ textarea.input { resize: vertical; }
   .mc-modes { order: 3; width: 100%; overflow-x: auto; margin: 0; justify-content: flex-start; scrollbar-width: none; }
   .mc-mode-ic { display: none; }
   .mc-status { margin-left: auto; }
-  .mc-panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: 52vh; }
+  .mc-panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: 52vh; background: rgba(8,11,17,.95); }
   .mc-panel-title { font-size: 22px; }
   .mc-time { left: 8px; right: 8px; bottom: calc(52vh + 16px); padding: 8px 12px; }
   .time-ticks { display: none; }

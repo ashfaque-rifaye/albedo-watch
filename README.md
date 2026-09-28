@@ -18,7 +18,7 @@ Build with AI: Code for Communities (2nd ed.) · **Track 02 — Clean Air & Clim
 
 Albedo-Watch fuses **citizen photos and voice notes in any Indian language**, **NASA satellite fires**, and **global atmospheric forecasts** to find pollution hotspots no monitor sees, trace smoke back to its source, and forecast spikes 72 hours ahead for 53 cities in 26 states.
 **Gemini 3.7 Flash** verifies citizen evidence, explains sources and drafts GRAP-aligned orders with multilingual voice advisories for the right authority — humans approve every dispatch.
-States improve each other's forecasts through a **federated Model Commons** that shares only model weights, never raw data — cutting forecast error **31%**, and **29% even for a state that contributes no data**.
+States improve each other's forecasts through a **federated Model Commons** that shares only model weights, never raw data — cutting forecast error by **~30–35%** (recomputed live every 6 h), and by nearly as much **even for a state that contributes no data**.
 
 ## Why this exists
 
@@ -35,7 +35,7 @@ India measures its air at a few hundred continuous stations, concentrated in big
 | **Act** | One click from spike to a GRAP-aligned action order + public advisories in the state's languages + SMS + voice | Gemini drafts, **Gemini TTS** voices it for IVR/radio; officer approves → dispatch → acknowledge → resolve on an auditable ledger (Firestore). Response simulator shows what each GRAP measure is worth *today* in *this* city |
 | **Learn** | States share models, not data | **FedAvg** across 21 state nodes + per-state personalisation + optional differential-privacy noise; leave-one-state-out shows benefit for states with zero data |
 
-## Results (live, reproducible — see `/api/commons`)
+## Results (live, reproducible — see `/api/commons`; snapshot of 28 Sep 2026)
 
 | Forecast of PM2.5 (held-out 18 h, 21 states) | Mean abs. error µg/m³ |
 |---|---|

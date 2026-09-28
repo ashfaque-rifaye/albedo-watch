@@ -99,8 +99,10 @@ def build_city(cid: str, s: dict) -> dict:
 
 
 async def all_cities() -> list[dict]:
+    import asyncio
     series = await datahub.city_series()
-    return [build_city(c.id, series[c.id]) for c in CITIES if c.id in series]
+    # CPU-bound (NAQI + federated correction for ~9k city-hours): keep it off the event loop
+    return await asyncio.to_thread(lambda: [build_city(c.id, series[c.id]) for c in CITIES if c.id in series])
 
 
 def public(c: dict, with_series: bool = False) -> dict:

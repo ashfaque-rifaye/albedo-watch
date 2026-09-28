@@ -119,9 +119,14 @@ def apportion(profile: str, fi: float, pm25: float | None, dust: float | None,
 
 async def attribute_city(city_row: dict) -> dict:
     field, fires = await datahub.wind_field(), await datahub.fires()
+    import asyncio
     t0 = time.time()
-    paths = trajectories(field, city_row["lat"], city_row["lon"], t0)
-    fi, clusters = fire_influence(paths, fires)
+
+    def work():
+        p = trajectories(field, city_row["lat"], city_row["lon"], t0)
+        return (p, *fire_influence(p, fires))
+
+    paths, fi, clusters = await asyncio.to_thread(work)
     s = city_row["_series"]
     k = s["now_offset"]
     shares = apportion(city_row["profile"], fi, s["pm25"][k], s["dust"][k], s["no2"][k], s["so2"][k])

@@ -86,8 +86,9 @@ async def find(limit: int = 15) -> dict:
             break
 
     field = await datahub.wind_field()
-    for h in top:
-        dw = attribution.downwind(field, h["lat"], h["lon"], hours=12)
+    import asyncio
+    dws = await asyncio.to_thread(lambda: [attribution.downwind(field, h["lat"], h["lon"], hours=12) for h in top])
+    for h, dw in zip(top, dws):
         h["downwind"] = {"cities": dw["cities"][:4], "pop_at_risk_m": dw["pop_at_risk_m"]}
         h["priority"] = round(h["score"] * (1 + math.log1p(10 * dw["pop_at_risk_m"])), 3)
         h["why"] = _why(h)

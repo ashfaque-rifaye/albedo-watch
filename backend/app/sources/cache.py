@@ -13,9 +13,28 @@ _store: dict[str, tuple[float, Any]] = {}
 _locks: dict[str, asyncio.Lock] = {}
 
 
-async def cached(key: str, ttl: int, fetch: Callable[[], Awaitable[Any]]) -> Any:
+_refreshing: set[str] = set()
+
+
+async def _refresh(key: str, fetch: Callable[[], Awaitable[Any]]) -> None:
+    try:
+        _store[key] = (time.time(), await fetch())
+    except Exception as exc:
+        log.warning("background refresh %s failed (%s)", key, type(exc).__name__)
+    finally:
+        _refreshing.discard(key)
+
+
+async def cached(key: str, ttl: int, fetch: Callable[[], Awaitable[Any]], swr: bool = True) -> Any:
+    """swr: once a value exists, an expired read returns it immediately and
+    refreshes in the background, so no user request ever waits on a rebuild."""
     hit = _store.get(key)
     if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    if hit and swr:
+        if key not in _refreshing:
+            _refreshing.add(key)
+            asyncio.get_running_loop().create_task(_refresh(key, fetch))
         return hit[1]
     lock = _locks.setdefault(key, asyncio.Lock())
     async with lock:

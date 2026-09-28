@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import hardening
@@ -62,4 +62,6 @@ if _STATIC.exists():
         f = _STATIC / path
         if path and f.is_file() and _STATIC in f.resolve().parents:
             return FileResponse(f)
+        if "." in path.rsplit("/", 1)[-1] or path.startswith("api/"):
+            return JSONResponse({"detail": "not found"}, status_code=404)  # never serve the SPA for a missing asset
         return FileResponse(_STATIC / "index.html", headers={"Cache-Control": "no-cache"})
