@@ -213,7 +213,7 @@ async def events(country: str | None = None, limit: int = Query(30, ge=1, le=80)
     """Live event feed (never blocks on a rebuild: reads what is already cached)."""
     now = time.time()
     out: list[dict] = []
-    cities = cache.peek("cities_built") or []
+    cities = cache.peek("cities_built") or (_snapshot("pulse") or {}).get("cities") or []
     for c in cities:
         sp = c.get("spike")
         if sp:
