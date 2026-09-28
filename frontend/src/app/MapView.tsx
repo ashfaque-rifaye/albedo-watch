@@ -1,12 +1,17 @@
 import { useEffect, useRef } from 'react'
 import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+// Ship MapLibre's worker (and the chunk it shares) as one self-contained script;
+// without this the production build omits it and the basemap never renders.
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { MapboxOverlay } from '@deck.gl/mapbox'
 import { ArcLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers'
 import { TripsLayer } from '@deck.gl/geo-layers'
 import type { Layer } from '@deck.gl/core'
 import type { City, Cluster, Corridor, Fire, Hotspot, Report, WindVec } from '../lib/api'
 import { hexToRgb, naqiColor } from '../lib/format'
+
+maplibregl.setWorkerUrl(workerUrl)
 
 const STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json'
 const ADDITIVE = { blend: true, blendColorSrcFactor: 'src-alpha', blendColorDstFactor: 'one', blendAlphaSrcFactor: 'one', blendAlphaDstFactor: 'one' } as const

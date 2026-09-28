@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [react()],
   // MapLibre v6 loads its ES-module worker relative to its own file; pre-bundling breaks that URL.
   optimizeDeps: { exclude: ['maplibre-gl'] },
+  worker: { format: 'iife' },
   server: { port: Number(process.env.PORT) || 5180, proxy: { '/api': 'http://localhost:8010' } },
   build: {
     chunkSizeWarningLimit: 1500,

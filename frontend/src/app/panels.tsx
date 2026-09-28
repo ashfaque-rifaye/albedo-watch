@@ -365,7 +365,7 @@ export function CitizenPanel({ ctx }: { ctx: Ctx }) {
     const fd = new FormData()
     fd.append('lat', String(ctx.pick.lat)); fd.append('lon', String(ctx.pick.lon)); fd.append('text', text); fd.append('lang', lang)
     photos.forEach((p) => fd.append('photos', p, p.name))
-    if (voice) fd.append('voice', voice, 'voice.webm')
+    if (voice) fd.append('voice', voice, voice instanceof File ? voice.name : 'voice.webm')
     try {
       const r = await api.createReport(fd)
       setResult(r); ctx.setSelectedReport(r.id); await ctx.refreshReports()
@@ -387,6 +387,10 @@ export function CitizenPanel({ ctx }: { ctx: Ctx }) {
           <span className="cap-ic">{recording ? '■' : '●'}</span><b>{recording ? 'Recording…' : voice ? 'Voice note ✓' : 'Voice'}</b><span className="muted">any Indian language</span>
         </button>
       </div>
+      <label className="linkish" style={{ justifySelf: 'start', cursor: 'pointer' }}>
+        <input type="file" accept="audio/*" hidden data-testid="voice-file" onChange={(e) => { const f = e.target.files?.[0]; if (f) setVoice(f) }} />
+        …or attach a voice note (e.g. forwarded from WhatsApp)
+      </label>
       {photos.length > 0 && <div className="thumbs">{photos.map((p) => <img key={p.name} src={URL.createObjectURL(p)} alt="" />)}</div>}
       <textarea className="input" rows={3} placeholder="Optional: describe what you see — in any language" value={text} onChange={(e) => setText(e.target.value)} />
       <div className="btn-row">
