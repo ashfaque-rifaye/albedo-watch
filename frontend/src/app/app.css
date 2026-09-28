@@ -317,3 +317,7 @@ textarea.input { resize: vertical; }
 .mc-time { left: 282px; }
 @media (max-width: 1100px) { .mc-time { left: 16px; } .popover { right: 8px; left: 8px; width: auto; } }
 @media (max-width: 820px) { .view-btns { top: auto; bottom: calc(52vh + 90px); } .mc-panel.place { width: auto; } }
+
+/* legibility over busy 3D imagery */
+.mc-panel { background: linear-gradient(155deg, rgba(20,26,38,.82), rgba(7,10,16,.78)); }
+.mc-legend, .mc-time { background: linear-gradient(155deg, rgba(20,26,38,.72), rgba(7,10,16,.68)); }

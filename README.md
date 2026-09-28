@@ -16,36 +16,26 @@ Build with AI: Code for Communities (2nd ed.) · **Track 02 — Clean Air & Clim
 
 ## In three lines
 
-Albedo-Watch fuses **citizen photos and voice notes in any Indian language**, **NASA satellite fires**, and **global atmospheric forecasts** to find pollution hotspots no monitor sees, trace smoke back to its source, and forecast spikes 72 hours ahead for 53 cities in 26 states.
-**Gemini 3.7 Flash** verifies citizen evidence, explains sources and drafts GRAP-aligned orders with multilingual voice advisories for the right authority — humans approve every dispatch.
-States improve each other's forecasts through a **federated Model Commons** that shares only model weights, never raw data — cutting forecast error by **~30–35%** (recomputed live every 6 h), and by nearly as much **even for a state that contributes no data**.
+Albedo-Watch is a citizen-powered air-intelligence network on a live, photorealistic 3D Earth: anyone can report smoke by photo or voice note in their own language, and **Gemini 3.7 Flash** verifies it against NASA satellite heat detections and routes it to the responsible authority.
+It traces each city's pollution back to its sources, forecasts unhealthy air 72 hours ahead for **233 cities in 104 countries** (India in state-level depth with CPCB NAQI and GRAP), and drafts action orders with advisories in **English plus the local languages**, backed by today's NASA satellite image — a human approves every dispatch.
+States and countries improve each other's forecasts through **regional federated learning** that shares only model weights, never raw data.
 
-## Why this exists
+## What you can do in it
 
-India measures its air at a few hundred continuous stations, concentrated in big cities. The smoke that chokes those cities is born in fields, kilns and bylanes nobody measures — and global forecasts, at ~40 km resolution, miss local reality (this week they over-read Delhi's PM2.5 by roughly 3×). Existing tools are dashboards of the past. Albedo-Watch is a closed loop from evidence to action.
-
-## The loop
-
-| Step | What happens | How |
-|---|---|---|
-| **Detect** | Hidden hotspots: evidence of pollution where no official monitor exists, ranked by people downwind | NASA FIRMS VIIRS FRP + verified citizen reports on a 0.5° lattice × (1 − station coverage) × downwind population; Google Geocoding keeps it inside India and names the district |
-| **Citizen Sense** | Anyone reports smoke by photo or voice in their own language | **Gemini 3.7 Flash multimodal** classifies the source (11 types), grades severity, rejects drawings/screenshots/AI images, transcribes & translates voice, replies in the citizen's language; independently cross-checked against satellite fires, nearby reports and modelled PM2.5; routed to the responsible authority by jurisdiction |
-| **Trace** | "Where is this city's air coming from right now?" | 7-member ensemble **back-trajectories**, 48 h through the live wind field, coupled to fires in space & time; transparent apportionment (biomass, dust from CAMS speciation, sector priors tilted by NO₂/SO₂); Gemini narrates |
-| **Forecast** | Hourly **Indian NAQI** (CPCB breakpoints) for 53 cities & 6 economic corridors, 72 h ahead, with GRAP stage, lead time and daytime ventilation-index stagnation | CAMS composition forecasts bias-corrected by the federated model |
-| **Act** | One click from spike to a GRAP-aligned action order + public advisories in the state's languages + SMS + voice | Gemini drafts, **Gemini TTS** voices it for IVR/radio; officer approves → dispatch → acknowledge → resolve on an auditable ledger (Firestore). Response simulator shows what each GRAP measure is worth *today* in *this* city |
-| **Learn** | States share models, not data | **FedAvg** across 21 state nodes + per-state personalisation + optional differential-privacy noise; leave-one-state-out shows benefit for states with zero data |
-
-## Results (live, reproducible — see `/api/commons`; snapshot of 28 Sep 2026)
-
-| Forecast of PM2.5 (held-out 18 h, 21 states) | Mean abs. error µg/m³ |
+| | |
 |---|---|
-| Global model (CAMS) | 13.8 |
-| Each state training alone | 14.3 — *worse than doing nothing* |
-| **Federated** | **9.4 (−31%)** |
-| **Federated + personalised** | **8.8 (−36%)** |
-| **State with zero data, served by the federation** | **9.7 (−29%)** |
+| **Pulse** | The planet's air, live: 233 cities, NAQI in India / US AQI elsewhere, 72 h spike warnings with lead times, region filters, a time machine from −24 h to +72 h |
+| **Click anywhere** | A God's-eye drill-down for any coordinate on Earth: Google's live measured air quality in that country's official index, a forecast at that exact spot, NASA heat detections within 50 km, nearby citizen sensors, today's and yesterday's NASA satellite image, Street View, and **Google Photorealistic 3D** of the city |
+| **Detect** | Hidden hotspots: satellite heat + citizen reports where no official monitor is nearby, ranked by people downwind, in plain units (detections, MW, km to nearest monitor) |
+| **Trace** | 48 h ensemble back-trajectories through the live wind field → which fires the air crossed → an explainable source breakdown + response simulator |
+| **Citizen** | Photo / voice note / WhatsApp voice file in any language → Gemini classification, authenticity check, satellite corroboration, jurisdiction routing, reply in the citizen's language with voice |
+| **Command** | GRAP-aligned (India) or WHO-referenced (elsewhere) action orders; pick languages (English + local, up to 4); NASA image evidence read by Gemini; SMS + TTS voice; approve → dispatch → acknowledge → resolve ledger |
+| **Commons** | Regional federated learning across 48 nodes (Indian states + countries) with per-node personalisation and optional differential privacy |
 
-Raw observations kept local: ~105 KB. Weights shared: ~79 KB total across 30 rounds.
+## Honest numbers (live — recomputed every few hours)
+
+- **NASA heat detections**: ~47,000 per 24 h worldwide after merging the two VIIRS satellites' duplicate sightings (~93,000 raw). Median intensity ~5 MW: most are small crop or vegetation fires, some are gas flares. The UI says so.
+- **Federated learning** (snapshot 28 Sep 2026, PM2.5 MAE on held-out hours): global CAMS 15.6 µg/m³ · one planet-wide model 11.8 · regional federations 10.5 · each node alone 8.7 · **federated + personalised 8.1 (−48%)** · a node with zero data, served by its federation 12.5 (−20%). Lesson we built in: bias is regional, so federations are regional.
 
 ## Google AI & Cloud — doing real work
 
@@ -53,7 +43,8 @@ Raw observations kept local: ~105 KB. Weights shared: ~79 KB total across 30 rou
 - **Gemini 3.8 Flash TTS**: voice advisories and citizen replies.
 - **Google Maps Platform**: Air Quality API history (station-fused ground truth for federated training), Geocoding (jurisdiction routing, country filter).
 - **Cloud Run** (asia-south1, scales to zero) · **Firestore** (reports + action ledger) · **Secret Manager** (all keys).
-- Open public data: **NASA FIRMS** VIIRS S-NPP + NOAA-20, **CAMS** global composition forecasts and NWP winds/boundary layer via Open-Meteo.
+- **Google Map Tiles API** (Photorealistic 3D Tiles) and the **Air Quality heatmap** layer on a CesiumJS globe; **Street View Static** for street-level context (live, never stored).
+- Open public data: **NASA FIRMS** VIIRS S-NPP + NOAA-20 (global), **NASA GIBS** daily VIIRS imagery, **CAMS** global composition forecasts and NWP winds via Open-Meteo, **Sensor.Community** open citizen PM sensors, **Esri World Imagery**, and **OpenAQ** official stations when a key is configured.
 
 ## Built for India — and beyond
 
@@ -64,7 +55,7 @@ Raw observations kept local: ~105 KB. Weights shared: ~79 KB total across 30 rou
 ## Architecture
 
 ```
-React 19 + Vite ─ MapLibre GL + deck.gl (wind particles, fire glow, trips, arcs)
+React 19 + Vite ─ CesiumJS 3D globe (Esri / NASA GIBS imagery, Google 3D Tiles, wind particles, trajectories, arcs)
         │  REST
 FastAPI (Cloud Run) ──┬─ datahub: CAMS · NWP winds · FIRMS · Google AQ (TTL cache, single-flight, stale-on-error)
                       ├─ engines: NAQI · forecast · attribution · hotspots · response · federated (numpy)
