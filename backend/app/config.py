@@ -30,7 +30,12 @@ class Settings(BaseSettings):
 
     # Google Maps Platform — server key: Air Quality history (ground truth), Geocoding
     google_maps_api_key: str = ""
+    # Browser key (referrer-restricted: 3D Tiles, Air Quality heatmap). Public by nature; served to the SPA.
+    google_browser_key: str = ""
     server_api_key: str = ""
+
+    # OpenAQ v3 (official ground stations worldwide) — optional
+    openaq_api_key: str = ""
 
     # Google Cloud
     gcp_project: str = ""
@@ -38,7 +43,7 @@ class Settings(BaseSettings):
     report_store: str = "auto"
 
     # Data refresh cadence (seconds) — keeps us well inside free-tier quotas
-    aq_ttl: int = 3600
+    aq_ttl: int = 3 * 3600
     wind_ttl: int = 3 * 3600
     fires_ttl: int = 3 * 3600
     truth_ttl: int = 6 * 3600

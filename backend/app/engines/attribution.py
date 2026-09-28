@@ -50,7 +50,7 @@ def trajectories(field: datahub.WindField, lat: float, lon: float, t0: float,
 def nearest_place(lat: float, lon: float) -> dict:
     c = min(CITIES, key=lambda c: haversine_km(lat, lon, c.lat, c.lon))
     d = haversine_km(c.lat, c.lon, lat, lon)
-    return {"city": c.name, "state": c.state, "km": round(d), "dir": compass(bearing_deg(c.lat, c.lon, lat, lon)),
+    return {"city": c.name, "state": c.state, "country": c.country, "km": round(d), "dir": compass(bearing_deg(c.lat, c.lon, lat, lon)),
             "label": f"{round(d)} km {compass(bearing_deg(c.lat, c.lon, lat, lon))} of {c.name}" if d > 8 else c.name}
 
 
@@ -118,7 +118,7 @@ def apportion(profile: str, fi: float, pm25: float | None, dust: float | None,
 
 
 async def attribute_city(city_row: dict) -> dict:
-    field, fires = await datahub.wind_field(), await datahub.fires()
+    field, fires = await datahub.wind_for(city_row["lat"], city_row["lon"]), await datahub.fires()
     import asyncio
     t0 = time.time()
 

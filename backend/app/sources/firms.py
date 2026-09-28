@@ -1,7 +1,9 @@
-"""NASA FIRMS active-fire detections (VIIRS S-NPP + NOAA-20), South Asia, last 48 h.
+"""NASA FIRMS thermal-anomaly detections (VIIRS S-NPP + NOAA-20), global, last 24 h.
 
-Public NRT CSVs — no key required. Detections are de-duplicated into ~4 km bins
-(the two satellites see the same fires minutes apart).
+A *detection* is one 375 m satellite pixel that is anomalously hot during an
+overpass — usually a vegetation or crop fire, sometimes a gas flare, volcano or
+industrial heat source. Public NRT CSVs, no key. The two satellites pass ~50 min
+apart and see the same fire twice, so detections are merged into ~1 km clusters.
 """
 from __future__ import annotations
 
@@ -12,13 +14,12 @@ from datetime import datetime, timezone
 
 import httpx
 
-from ..geo import in_bbox
 
 log = logging.getLogger("albedo.firms")
 
 FEEDS = {
-    "VIIRS S-NPP": "https://firms.modaps.eosdis.nasa.gov/data/active_fire/suomi-npp-viirs-c2/csv/SUOMI_VIIRS_C2_South_Asia_48h.csv",
-    "VIIRS NOAA-20": "https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-20-viirs-c2/csv/J1_VIIRS_C2_South_Asia_48h.csv",
+    "VIIRS S-NPP": "https://firms.modaps.eosdis.nasa.gov/data/active_fire/suomi-npp-viirs-c2/csv/SUOMI_VIIRS_C2_Global_24h.csv",
+    "VIIRS NOAA-20": "https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-20-viirs-c2/csv/J1_VIIRS_C2_Global_24h.csv",
 }
 
 
@@ -27,8 +28,6 @@ def _parse(text: str, sensor: str) -> list[dict]:
     for r in csv.DictReader(io.StringIO(text)):
         try:
             lat, lon = float(r["latitude"]), float(r["longitude"])
-            if not in_bbox(lat, lon):
-                continue
             conf = (r.get("confidence") or "n").lower()[:1]
             if conf == "l":  # drop low-confidence VIIRS detections
                 continue
@@ -56,10 +55,10 @@ async def fetch_fires() -> list[dict]:
                 log.warning("FIRMS %s unavailable (%s)", sensor, type(exc).__name__)
     if not raw:
         raise RuntimeError("no FIRMS feed reachable")
-    # de-duplicate into 0.04° bins, keeping the max FRP and the latest time
+    # merge the two satellites' views of the same fire: ~1 km clusters, max FRP, latest time
     bins: dict[tuple[int, int], dict] = {}
     for f in raw:
-        k = (round(f["lat"] / 0.04), round(f["lon"] / 0.04))
+        k = (round(f["lat"] / 0.01), round(f["lon"] / 0.01))
         b = bins.get(k)
         if b is None:
             bins[k] = {**f, "n": 1}

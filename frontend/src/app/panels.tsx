@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Alert, City, Hotspot, Report, SimResult } from '../lib/api'
+import type { Alert, Cat, City, DraftBody, Hotspot, PlaceIntel, Report, SimResult } from '../lib/api'
 import { api } from '../lib/api'
-import { LANG_NAMES, ago, fmt, istTime, mdLite, naqiColor, naqiLabel } from '../lib/format'
+import { LANG_NAMES, ago, fmt, istTime, mdLite } from '../lib/format'
 import { ForecastChart, HBars, RoundsChart, SourceBar } from './charts'
-import type { Ctx } from './MissionControl'
+import { LEVEL_COLORS } from './Globe'
+import type { Ctx, DraftFor } from './MissionControl'
 
 /* ================================================================ shared */
 function Stat({ value, label, tone }: { value: string; label: string; tone?: string }) {
@@ -15,10 +16,11 @@ function Stat({ value, label, tone }: { value: string; label: string; tone?: str
   )
 }
 
-function NaqiBadge({ v, big }: { v: number | null; big?: boolean }) {
+export function IndexBadge({ v, cat, big, system }: { v: number | null | undefined; cat?: Cat; big?: boolean; system?: string }) {
+  const color = cat?.color ?? (cat && cat.level >= 0 ? LEVEL_COLORS[cat.level] : '#6b7280')
   return (
-    <span className={`naqi-badge ${big ? 'big' : ''}`} style={{ ['--c' as string]: naqiColor(v) }}>
-      <b className="mono">{v ?? '—'}</b><span>{naqiLabel(v)}</span>
+    <span className={`naqi-badge ${big ? 'big' : ''}`} style={{ ['--c' as string]: color }}>
+      <b className="mono">{v ?? '—'}</b><span>{cat?.label ?? 'No data'}{system && big ? <em> · {system}</em> : null}</span>
     </span>
   )
 }
@@ -37,6 +39,17 @@ function AiTag({ model, ms }: { model?: string | null; ms?: number }) {
   return <span className="ai-tag">✦ {model}{ms ? ` · ${(ms / 1000).toFixed(1)} s` : ''}</span>
 }
 
+function useElapsed(active: boolean) {
+  const [s, setS] = useState(0)
+  useEffect(() => {
+    if (!active) { setS(0); return }
+    const t0 = Date.now()
+    const iv = setInterval(() => setS(Math.round((Date.now() - t0) / 1000)), 500)
+    return () => clearInterval(iv)
+  }, [active])
+  return s
+}
+
 function useSteps(active: boolean, steps: string[], every = 1600) {
   const [i, setI] = useState(0)
   useEffect(() => {
@@ -47,79 +60,98 @@ function useSteps(active: boolean, steps: string[], every = 1600) {
   return i
 }
 
-function StepList({ steps, at }: { steps: string[]; at: number }) {
+function StepList({ steps, at, elapsed }: { steps: string[]; at: number; elapsed?: number }) {
   return (
-    <ol className="steps">
-      {steps.map((s, i) => <li key={s} className={i < at ? 'done' : i === at ? 'now' : ''}>{s}</li>)}
-    </ol>
+    <div className="steps-wrap">
+      <ol className="steps">
+        {steps.map((s, i) => <li key={s} className={i < at ? 'done' : i === at ? 'now' : ''}>{s}</li>)}
+      </ol>
+      {elapsed != null && <div className="elapsed mono">{elapsed}s</div>}
+    </div>
   )
 }
 
 function CityPicker({ ctx, value, onChange }: { ctx: Ctx; value: string | null; onChange: (id: string) => void }) {
-  const byState = useMemo(() => {
+  const groups = useMemo(() => {
     const m = new Map<string, City[]>()
-    for (const c of [...ctx.cities].sort((a, b) => a.name.localeCompare(b.name))) m.set(c.state_name, [...(m.get(c.state_name) ?? []), c])
-    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    for (const c of [...ctx.cities].sort((a, b) => a.name.localeCompare(b.name))) {
+      const g = c.india ? `India · ${c.state_name}` : c.country_name
+      m.set(g, [...(m.get(g) ?? []), c])
+    }
+    return [...m.entries()].sort((a, b) => (a[0].startsWith('India') === b[0].startsWith('India') ? a[0].localeCompare(b[0]) : a[0].startsWith('India') ? -1 : 1))
   }, [ctx.cities])
   return (
     <select className="select" value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
       <option value="" disabled>Choose a city…</option>
-      {byState.map(([st, cs]) => <optgroup key={st} label={st}>{cs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)}
+      {groups.map(([g, cs]) => <optgroup key={g} label={g}>{cs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)}
     </select>
   )
+}
+
+const REGIONS = ['World', 'India', 'South Asia', 'East Asia', 'South-East Asia', 'Middle East', 'Europe', 'Africa', 'North America', 'Latin America', 'Oceania', 'Central Asia']
+function inRegion(c: City, r: string) {
+  if (r === 'World') return true
+  if (r === 'India') return c.india
+  if (r === 'South Asia') return c.region === 'South Asia' && !c.india
+  return c.region === r
 }
 
 /* ================================================================ PULSE */
 export function PulsePanel({ ctx }: { ctx: Ctx }) {
   const p = ctx.pulse
+  const [region, setRegion] = useState('World')
   const city = ctx.cities.find((c) => c.id === ctx.selectedCity)
-  if (!p) return <Loading lines={6} label="Pulling CAMS forecasts, winds and satellite fires for 53 cities…" />
+  if (!p) return <Loading lines={6} label="Pulling forecasts, winds, satellites and sensors for 233 cities…" />
   if (city) return <CityCard ctx={ctx} city={city} />
   const s = p.summary
-  const spikes = p.cities.filter((c) => c.spike).sort((a, b) => b.spike!.peak - a.spike!.peak)
+  const inR = p.cities.filter((c) => inRegion(c, region))
+  const spikes = inR.filter((c) => c.spike).sort((a, b) => b.spike!.peak_category.level - a.spike!.peak_category.level || b.spike!.peak - a.spike!.peak)
+  const worst = inR.filter((c) => c.naqi != null).sort((a, b) => b.category.level - a.category.level || b.naqi! - a.naqi!)
   return (
     <div className="stack">
       <div className="stats-2">
-        <Stat value={`${fmt(s.pop_spike_m, 0)}M`} label="people in cities with a forecast spike (72 h)" tone="#f08a24" />
-        <Stat value={`${s.spikes_72h}`} label={`of ${s.cities} cities heading to Poor or worse`} />
-        <Stat value={`${s.states}`} label="states & UTs, one network" />
-        <Stat value={`${s.national_median ?? '—'}`} label="national median NAQI now" tone={naqiColor(s.national_median)} />
+        <Stat value={`${fmt(s.pop_covered_m, 0)}M`} label={`people in ${s.cities} cities across ${s.countries} countries, forecast hourly`} />
+        <Stat value={`${s.spikes_72h}`} label="cities heading into unhealthy air in the next 72 h" tone="#f08a24" />
+        <Stat value={fmt(ctx.fireInfo?.count)} label="satellite heat detections, last 24 h (NASA)" tone="#ff8a3d" />
+        <Stat value={`${s.national_median ?? '—'}`} label={`India median NAQI now · ${s.india_cities} cities, ${s.states} states`} tone={LEVEL_COLORS[Math.max(0, Math.min(5, Math.floor((s.national_median ?? 0) / 100)))]} />
       </div>
       {p.model && (
         <div className="callout">
           <span className="eyebrow" style={{ color: 'var(--albedo)' }}>⬡ Model Commons active</span>
-          <div>Every forecast here is bias-corrected by a model 21 states trained <b>without sharing raw data</b> — error down <b>{p.model.improvement_pct}%</b> vs the global model.</div>
+          <div>Forecasts here are corrected by regional federations of {p.model.nodes} states &amp; countries that <b>never share raw data</b> — error down <b>{p.model.improvement_pct}%</b> vs the global model.</div>
         </div>
       )}
+      <div className="chips-row">{REGIONS.map((r) => <button key={r} className={`chip chip-btn ${r === region ? 'on' : ''}`} onClick={() => setRegion(r)}>{r}</button>)}</div>
       <section>
-        <div className="sec-h"><h3>Spike warnings</h3><span className="muted">sorted by peak</span></div>
+        <div className="sec-h"><h3>Spike warnings · {region}</h3><span className="muted">{spikes.length}</span></div>
         <div className="list">
-          {spikes.slice(0, 12).map((c) => (
+          {spikes.slice(0, 10).map((c) => (
             <button key={c.id} className="row" onClick={() => ctx.selectCity(c.id)}>
-              <span className="dot" style={{ background: naqiColor(c.spike!.peak) }} />
+              <span className="dot" style={{ background: c.spike!.peak_category.color }} />
               <div className="row-main">
-                <div className="row-t">{c.name} <span className="muted">· {c.state_name}</span></div>
-                <div className="row-s">{c.spike!.category} in ~{c.spike!.lead_hours} h · {c.spike!.grap.name}</div>
+                <div className="row-t">{c.name} <span className="muted">· {c.india ? c.state_name : c.country_name}</span></div>
+                <div className="row-s">{c.spike!.peak_category.label} in ~{c.spike!.lead_hours} h · {c.spike!.grap.name}</div>
               </div>
-              <span className="mono row-v" style={{ color: naqiColor(c.spike!.peak) }}>{c.spike!.peak}</span>
+              <span className="mono row-v" style={{ color: c.spike!.peak_category.color }}>{c.spike!.peak}</span>
             </button>
           ))}
-          {!spikes.length && <div className="muted">No spikes forecast in the next 72 h.</div>}
+          {!spikes.length && <div className="muted" style={{ fontSize: 13 }}>No city here is forecast to reach unhealthy air in the next 72 h.</div>}
         </div>
       </section>
       <section>
-        <div className="sec-h"><h3>Worst air right now</h3></div>
+        <div className="sec-h"><h3>Worst air right now · {region}</h3></div>
         <div className="list">
-          {[...p.cities].filter((c) => c.naqi != null).sort((a, b) => b.naqi! - a.naqi!).slice(0, 6).map((c) => (
+          {worst.slice(0, 8).map((c) => (
             <button key={c.id} className="row" onClick={() => ctx.selectCity(c.id)}>
-              <span className="dot" style={{ background: naqiColor(c.naqi) }} />
-              <div className="row-main"><div className="row-t">{c.name}</div><div className="row-s">{c.dominant ?? 'PM'} · {c.stations} official monitor{c.stations === 1 ? '' : 's'} (approx.)</div></div>
-              <span className="mono row-v" style={{ color: naqiColor(c.naqi) }}>{c.naqi}</span>
+              <span className="dot" style={{ background: c.category.color }} />
+              <div className="row-main"><div className="row-t">{c.name} <span className="muted">· {c.india ? c.state_name : c.country_name}</span></div>
+                <div className="row-s">{c.category.label} · {c.dominant ?? 'PM'} · {c.index_system}</div></div>
+              <span className="mono row-v" style={{ color: c.category.color }}>{c.naqi}</span>
             </button>
           ))}
         </div>
       </section>
-      <p className="fine">NAQI computed from CPCB breakpoints on bias-corrected CAMS PM2.5/PM10 + NO₂/SO₂. O₃/CO shown separately (uncorrected). Forecasts are model estimates, not official CPCB bulletins.</p>
+      <p className="fine">India: CPCB NAQI (PM2.5/PM10/NO₂/SO₂). Elsewhere: US EPA AQI (PM). Both on bias-corrected CAMS forecasts — model estimates, not official bulletins. Click anywhere on the globe for live, local readings.</p>
     </div>
   )
 }
@@ -129,34 +161,34 @@ function CityCard({ ctx, city }: { ctx: Ctx; city: City }) {
   useEffect(() => { setDetail(null); api.city(city.id).then(setDetail).catch(() => {}) }, [city.id])
   return (
     <div className="stack">
-      <button className="back" onClick={() => ctx.selectCity(null, false)}>← All India</button>
+      <button className="back" onClick={() => ctx.selectCity(null, false)}>← All cities</button>
       <div className="city-hero">
         <div>
           <div className="display" style={{ fontSize: 34 }}>{city.name}</div>
-          <div className="muted">{city.local_name !== city.name ? `${city.local_name} · ` : ''}{city.state_name} · {fmt(city.pop_m, 1)} M people</div>
+          <div className="muted">{city.local_name !== city.name ? `${city.local_name} · ` : ''}{city.india ? `${city.state_name}, India` : city.country_name} · {fmt(city.pop_m, 1)} M people</div>
         </div>
-        <NaqiBadge v={city.naqi} big />
+        <IndexBadge v={city.naqi} cat={city.category} big system={city.index_system} />
       </div>
       {city.spike ? (
-        <div className="callout warn">
-          <b>{city.spike.category} expected in ~{city.spike.lead_hours} h</b> — peak NAQI {city.spike.peak} around {istTime(city.spike.peak_time)}. Triggers <b>{city.spike.grap.name}</b>.
-        </div>
-      ) : <div className="callout">No category jump forecast in the next 72 h. Peak NAQI {city.peak72 ?? '—'}.</div>}
+        <div className="callout warn"><b>{city.spike.peak_category.label} expected in ~{city.spike.lead_hours} h</b> — peak {city.index_system} {city.spike.peak} around {istTime(city.spike.peak_time)} IST. {city.spike.grap.name}.</div>
+      ) : <div className="callout">No category jump forecast in the next 72 h. Peak {city.index_system} {city.peak72 ?? '—'}.</div>}
       <section>
-        <div className="sec-h"><h3>NAQI · past 24 h → next 72 h</h3></div>
-        {detail?.series ? <ForecastChart s={detail.series} /> : <div className="skeleton" style={{ height: 170 }} />}
+        <div className="sec-h"><h3>{city.index_system} · past 24 h → next 72 h</h3></div>
+        {detail?.series ? <ForecastChart system={city.index_system} d={{ time: detail.series.time, index: detail.series.naqi, level: detail.series.level, now_offset: detail.series.now_offset, pm25: detail.series.pm25, pm25_cams: detail.series.pm25_cams }} />
+          : <div className="skeleton" style={{ height: 170 }} />}
       </section>
       <div className="kv-grid">
         <div><span>PM2.5 (corrected)</span><b className="mono">{fmt(city.pm25, 0)} µg/m³</b></div>
         <div><span>Global model said</span><b className="mono">{fmt(city.pm25_cams, 0)} µg/m³</b></div>
         <div><span>Wind</span><b className="mono">{fmt(city.wind.speed, 0)} km/h from {fmt(city.wind.dir, 0)}°</b></div>
         <div><span>Daytime stagnation (48 h)</span><b className="mono">{city.stagnant_hours_48} h</b></div>
-        <div><span>Correction</span><b>{city.correction === 'personalised' ? 'State-personalised' : city.correction === 'federated-global' ? 'Federated (no local data)' : 'Raw'}</b></div>
-        <div><span>Responsible authority</span><b>{city.authority.primary_short}</b></div>
+        <div><span>Correction</span><b>{city.correction === 'personalised' ? 'Personalised (own truth)' : city.correction === 'federated-global' ? 'Borrowed from its federation' : 'Raw'}</b></div>
+        <div><span>Authority</span><b>{city.authority.primary_short}</b></div>
       </div>
       <div className="btn-row">
-        <button className="btn btn-primary" onClick={() => ctx.setMode('trace')}>↶ Trace the sources</button>
-        <button className="btn btn-ghost" onClick={() => { ctx.setDraftFor({ kind: 'city', city: city.id }); ctx.setMode('command') }}>▲ Draft alert</button>
+        <button className="btn btn-primary" onClick={() => ctx.openPlace(city.lat, city.lon, 9000)}>⌖ Live view</button>
+        <button className="btn btn-ghost" onClick={() => ctx.setMode('trace')}>↶ Trace sources</button>
+        <button className="btn btn-ghost" onClick={() => { ctx.setDraftFor({ kind: 'city', city: city.id, label: city.name }); ctx.setMode('command') }}>▲ Draft alert</button>
       </div>
       {city.category.health && <p className="fine">Health: {city.category.health}</p>}
     </div>
@@ -172,44 +204,51 @@ export function DetectPanel({ ctx }: { ctx: Ctx }) {
     window.addEventListener('albedo:hotspot', on)
     return () => window.removeEventListener('albedo:hotspot', on)
   }, [])
-  if (!hs) return <Loading lines={6} label="Scanning 0.5° cells for fires & reports with no monitor nearby…" />
+  const rank = sel && hs ? hs.hotspots.findIndex((h) => h.lat === sel.lat && h.lon === sel.lon) + 1 : 0
   return (
     <div className="stack">
-      <div className="stats-2">
-        <Stat value={`${Math.round(hs.unmonitored_share * 100)}%`} label="of evidence cells have no official monitor nearby" tone="#f096ff" />
-        <Stat value={fmt(hs.fires)} label="VIIRS fire detections scanned (48 h)" tone="#ff6a2b" />
+      <div className="seg wide">
+        {(['world', 'india'] as const).map((s) => <button key={s} className={ctx.hotScope === s ? 'on' : ''} onClick={() => { setSel(null); ctx.setHotScope(s) }}>{s === 'world' ? 'Whole world' : 'India'}</button>)}
       </div>
-      <p className="lede">Official monitors cluster in big cities. Albedo-Watch finds pollution <i>between</i> them — where satellites and citizens see it, and no one measures it.</p>
-      {sel && (
-        <div className="card focus">
-          <div className="sec-h"><h3>{sel.admin.district || sel.place.label}</h3><button className="x" onClick={() => setSel(null)}>×</button></div>
-          <div className="muted" style={{ fontSize: 13 }}>{[sel.admin.locality, sel.admin.state].filter(Boolean).join(', ')} · {sel.place.label}</div>
-          <p>{sel.why}</p>
-          <div className="kv-grid">
-            <div><span>Evidence</span><b className="mono">{Math.round(sel.evidence * 100)}%</b></div>
-            <div><span>Monitoring coverage</span><b className="mono">{Math.round(sel.coverage * 100)}%</b></div>
-            <div><span>Downwind people (12 h)</span><b className="mono">{fmt(sel.downwind.pop_at_risk_m, 2)} M</b></div>
-            <div><span>Priority</span><b className="mono">{sel.priority.toFixed(2)}</b></div>
+      {!hs ? <Loading lines={6} label="Scanning the planet for heat and reports where no monitor is watching…" /> : (<>
+        <p className="lede">Official monitors cluster in big cities. These are places where satellites or citizens see pollution and <b>no official monitor is nearby</b> — ranked by how many people live downwind.</p>
+        <div className="stats-2">
+          <Stat value={`${Math.round(hs.unmonitored_share * 100)}%`} label={hs.official_coverage_known ? 'of evidence sits more than 25 km from any official monitor' : 'of evidence in India sits more than 25 km from an official monitor (station locations elsewhere pending OpenAQ)'} tone="#f096ff" />
+          <Stat value={fmt(hs.sensors)} label={`open citizen sensors counted as partial coverage${hs.stations ? ` · ${fmt(hs.stations)} official stations` : ''}`} tone="#9ccc3a" />
+        </div>
+        {sel && (
+          <div className="card focus">
+            <div className="sec-h"><h3><span className="rank-pill">#{rank}</span> {sel.admin?.district || sel.place.label}</h3><button className="x" onClick={() => setSel(null)} aria-label="Close">×</button></div>
+            <div className="muted" style={{ fontSize: 13 }}>{[sel.admin?.locality, sel.admin?.state, sel.admin?.country].filter(Boolean).join(', ')} · {sel.place.label}</div>
+            <div className="facts">
+              <div><b className="mono">{sel.fires}</b><span>heat detections (24 h)</span></div>
+              <div><b className="mono">{sel.frp_max.toFixed(0)} MW</b><span>largest fire</span></div>
+              <div><b className="mono">{sel.nearest_monitor_km != null ? `${sel.nearest_monitor_km} km` : hs.official_coverage_known || (sel.lat > 6 && sel.lat < 37.5 && sel.lon > 68 && sel.lon < 97.5) ? '> 100 km' : 'unknown'}</b><span>to nearest official monitor</span></div>
+              <div><b className="mono">{fmt(sel.downwind.pop_at_risk_m, 2)} M</b><span>people downwind (12 h)</span></div>
+            </div>
+            <p style={{ margin: 0, fontSize: 13.5 }}>{sel.why}</p>
+            <div className="btn-row">
+              <button className="btn btn-primary btn-sm" onClick={() => ctx.openPlace(sel.lat, sel.lon, 9000)}>⌖ Live view &amp; satellite image</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { ctx.setDraftFor({ kind: 'hotspot', lat: sel.lat, lon: sel.lon, label: sel.admin?.district || sel.place.label }); ctx.setMode('command') }}>▲ Enforcement order</button>
+            </div>
           </div>
-          <button className="btn btn-primary" onClick={() => { ctx.setDraftFor({ kind: 'hotspot', lat: sel.lat, lon: sel.lon }); ctx.setMode('command') }}>▲ Dispatch enforcement order</button>
-        </div>
-      )}
-      <section>
-        <div className="sec-h"><h3>Hidden hotspots</h3><span className="muted">priority = evidence × blind-ness × people downwind</span></div>
-        <div className="list">
-          {hs.hotspots.map((h, i) => (
-            <button key={i} className="row" onClick={() => ctx.onHotspot(h)}>
-              <span className="rank mono">{i + 1}</span>
-              <div className="row-main">
-                <div className="row-t">{h.admin.district || h.place.label}{h.admin.state ? <span className="muted"> · {h.admin.state}</span> : null}</div>
-                <div className="row-s">{h.fires ? `${h.fires} fires` : ''}{h.fires && h.reports ? ' + ' : ''}{h.reports ? `${h.reports} reports` : ''} · coverage {Math.round(h.coverage * 100)}%{h.downwind.cities[0] ? ` · → ${h.downwind.cities[0].name}` : ''}</div>
-              </div>
-              <span className="mono row-v" style={{ color: '#f096ff' }}>{h.priority.toFixed(2)}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-      <p className="fine">{hs.method}. Station counts are approximate public CPCB listings.</p>
+        )}
+        <section>
+          <div className="sec-h"><h3>Ranked hidden hotspots</h3><span className="muted">numbers match the map</span></div>
+          <div className="list">
+            {hs.hotspots.map((h, i) => (
+              <button key={i} className={`row ${sel && sel.lat === h.lat && sel.lon === h.lon ? 'active' : ''}`} onClick={() => { setSel(h); ctx.onHotspot(h) }}>
+                <span className="rank-pill">{i + 1}</span>
+                <div className="row-main">
+                  <div className="row-t">{h.admin?.district || h.place.label}{h.admin?.country ? <span className="muted"> · {h.admin.state || h.admin.country}</span> : null}</div>
+                  <div className="row-s">{h.fires} detections · max {h.frp_max.toFixed(0)} MW · monitor {h.nearest_monitor_km != null ? `${h.nearest_monitor_km} km` : hs.official_coverage_known || (h.lat > 6 && h.lat < 37.5 && h.lon > 68 && h.lon < 97.5) ? '>100 km' : 'unknown'}{h.downwind.cities[0] ? ` · → ${h.downwind.cities[0].name}` : ''}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+        <p className="fine">{hs.method}.</p>
+      </>)}
     </div>
   )
 }
@@ -220,60 +259,55 @@ export function TracePanel({ ctx }: { ctx: Ctx }) {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const a = ctx.attribution
-  const steps = ['Releasing 7 air parcels around the city', 'Running them 48 h backwards through the wind field', 'Matching paths to NASA VIIRS fires', 'Apportioning PM2.5 by source', 'Gemini writes the explanation']
+  const steps = ['Releasing 7 air parcels around the city', 'Running them 48 h backwards through the wind field', 'Matching paths to NASA VIIRS detections', 'Apportioning PM2.5 by source', 'Gemini writes the explanation']
   const at = useSteps(loading, steps, 1100)
+  const elapsed = useElapsed(loading)
 
-  useEffect(() => {
-    if (!ctx.selectedCity && cid) ctx.selectCity(cid, false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  useEffect(() => { if (!ctx.selectedCity && cid) ctx.selectCity(cid, false) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!cid) return
     let live = true
     setLoading(true); setErr(null); ctx.setAttribution(null)
     const c = ctx.cities.find((x) => x.id === cid)
-    if (c) ctx.flyTo(c.lon - 1.5, c.lat + 0.6, 5.2, 40)
+    if (c) ctx.flyTo(c.lon, c.lat, 1.6e6, -55)
     api.attribution(cid).then((r) => { if (live) ctx.setAttribution(r) }).catch((e) => live && setErr(e.message)).finally(() => live && setLoading(false))
     return () => { live = false }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cid])
+  }, [cid]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="stack">
       <CityPicker ctx={ctx} value={cid} onChange={(id) => ctx.selectCity(id, false)} />
-      {loading && <StepList steps={steps} at={at} />}
+      {loading && <StepList steps={steps} at={at} elapsed={elapsed} />}
       {err && <div className="err">{err}</div>}
-      {a && (
-        <>
-          {a.narrative && (
-            <div className="card">
-              <div className="display" style={{ fontSize: 22, lineHeight: 1.15 }}>{a.narrative.headline}</div>
-              <p style={{ margin: '10px 0 0' }}>{a.narrative.explanation}</p>
-              <div style={{ marginTop: 10 }}><AiTag model="Gemini" /> <span className="chip">confidence: {a.narrative.confidence}</span></div>
+      {a && (<>
+        {a.narrative && (
+          <div className="card">
+            <div className="display" style={{ fontSize: 22, lineHeight: 1.15 }}>{a.narrative.headline}</div>
+            <p style={{ margin: '10px 0 0' }}>{a.narrative.explanation}</p>
+            <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}><AiTag model="Gemini" /> <span className="chip">confidence: {a.narrative.confidence}</span></div>
+          </div>
+        )}
+        <section>
+          <div className="sec-h"><h3>Where {a.name}'s PM2.5 comes from</h3><span className="mono muted">{fmt(a.pm25, 0)} µg/m³</span></div>
+          <SourceBar sources={a.sources} />
+        </section>
+        <section>
+          <div className="sec-h"><h3>Upwind fire clusters</h3><span className="muted">fire influence {a.fire_influence}</span></div>
+          {a.clusters.length ? (
+            <div className="list">
+              {a.clusters.slice(0, 6).map((c, i) => (
+                <button key={i} className="row" onClick={() => ctx.openPlace(c.lat, c.lon, 30000)}>
+                  <span className="dot" style={{ background: '#ff8a3d' }} />
+                  <div className="row-main"><div className="row-t">{c.place.label}</div><div className="row-s">{c.fires} detections · {c.frp.toFixed(0)} MW total · ~{c.transport_h} h in transit</div></div>
+                  <span className="mono row-v">{Math.round(c.share * 100)}%</span>
+                </button>
+              ))}
             </div>
-          )}
-          <section>
-            <div className="sec-h"><h3>Where {a.name}'s PM2.5 comes from</h3><span className="mono muted">{fmt(a.pm25, 0)} µg/m³</span></div>
-            <SourceBar sources={a.sources} />
-          </section>
-          <section>
-            <div className="sec-h"><h3>Upwind fire clusters</h3><span className="muted">fire influence {a.fire_influence}</span></div>
-            {a.clusters.length ? (
-              <div className="list">
-                {a.clusters.slice(0, 6).map((c, i) => (
-                  <button key={i} className="row" onClick={() => ctx.flyTo(c.lon, c.lat, 7.5, 50)}>
-                    <span className="dot" style={{ background: '#ff6a2b', boxShadow: '0 0 10px #ff6a2b' }} />
-                    <div className="row-main"><div className="row-t">{c.place.label}</div><div className="row-s">{c.fires} fires · {c.frp.toFixed(0)} MW · smoke ~{c.transport_h} h in transit</div></div>
-                    <span className="mono row-v">{Math.round(c.share * 100)}%</span>
-                  </button>
-                ))}
-              </div>
-            ) : <div className="muted">No fire smoke on the incoming air paths — local sources dominate.</div>}
-          </section>
-          <Simulator ctx={ctx} city={a.city} />
-          <p className="fine">{a.method}. Indicative receptor-model proxy, not a chemical-transport model.</p>
-        </>
-      )}
+          ) : <div className="muted" style={{ fontSize: 13 }}>No fire smoke on the incoming air paths — local sources dominate.</div>}
+        </section>
+        <Simulator ctx={ctx} city={a.city} />
+        <p className="fine">{a.method}. Indicative receptor-model proxy, not a chemical-transport model.</p>
+      </>)}
     </div>
   )
 }
@@ -289,12 +323,10 @@ function Simulator({ ctx, city }: { ctx: Ctx; city: string }) {
   }, [city, sel, comp])
   return (
     <section className="card">
-      <div className="sec-h"><h3>Act: response simulator</h3><span className="muted">GRAP measures</span></div>
+      <div className="sec-h"><h3>Act: response simulator</h3><span className="muted">graded measures</span></div>
       {res && (
         <div className="sim-head">
-          <NaqiBadge v={res.naqi_before} />
-          <span className="arrow">→</span>
-          <NaqiBadge v={res.naqi_after} />
+          <IndexBadge v={res.naqi_before} cat={res.category_before} /><span className="arrow">→</span><IndexBadge v={res.naqi_after} cat={res.category_after} />
           <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
             <div className="display" style={{ fontSize: 28, color: 'var(--good)' }}>−{res.reduction_pct}%</div>
             <div className="muted" style={{ fontSize: 12 }}>PM2.5 −{res.reduction} µg/m³</div>
@@ -306,7 +338,7 @@ function Simulator({ ctx, city }: { ctx: Ctx; city: string }) {
           <label key={m.id} className={`measure ${sel.includes(m.id) ? 'on' : ''}`}>
             <input type="checkbox" checked={sel.includes(m.id)} onChange={(e) => setSel(e.target.checked ? [...sel, m.id] : sel.filter((x) => x !== m.id))} />
             <span className="measure-t">{m.label}</span>
-            <span className="measure-s">{m.owner} · GRAP {m.grap}{res?.measures.find((r) => r.id === m.id) ? ` · −${res.measures.find((r) => r.id === m.id)!.ugm3} µg` : ''}</span>
+            <span className="measure-s">{m.owner}{res?.measures.find((r) => r.id === m.id) ? ` · −${res.measures.find((r) => r.id === m.id)!.ugm3} µg` : ''}</span>
           </label>
         ))}
       </div>
@@ -318,8 +350,108 @@ function Simulator({ ctx, city }: { ctx: Ctx; city: string }) {
   )
 }
 
+/* ================================================================ PLACE (God's-eye) */
+export function PlacePanel({ ctx }: { ctx: Ctx }) {
+  const pl = ctx.place
+  const [d, setD] = useState<PlaceIntel | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [svOk, setSvOk] = useState(true)
+  const [big, setBig] = useState<string | null>(null)
+  const elapsed = useElapsed(!!pl && !d && !err)
+  useEffect(() => {
+    if (!pl) return
+    setD(null); setErr(null); setSvOk(true)
+    api.place(pl.lat, pl.lon).then(setD).catch((e) => setErr((e as Error).message))
+  }, [pl?.lat, pl?.lon]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (!pl) return <p className="lede">Click anywhere on the globe to see what is in the air there right now.</p>
+  if (err) return <div className="err">{err}</div>
+  if (!d) return <div className="stack"><div className="mono muted" style={{ fontSize: 12 }}>{pl.lat.toFixed(4)}, {pl.lon.toFixed(4)}</div><Loading lines={7} label={`Querying Google Air Quality, NASA, CAMS and ground sensors… ${elapsed}s`} /></div>
+  const g = d.google_aq, local = g.indexes?.find((i) => i.code !== 'uaqi'), uaqi = g.indexes?.find((i) => i.code === 'uaqi')
+  const f = d.forecast.now
+  const name = d.place.locality || d.place.district || d.place.nearest_city
+  const sv = d.imagery.streetview
+  return (
+    <div className="stack">
+      <div>
+        <div className="display" style={{ fontSize: 30, lineHeight: 1.05 }}>{name}</div>
+        <div className="muted" style={{ fontSize: 13 }}>{d.place.address || `${d.place.nearest_city_km} km from ${d.place.nearest_city}`}</div>
+        <div className="mono muted" style={{ fontSize: 11, marginTop: 4 }}>{d.lat.toFixed(5)}, {d.lon.toFixed(5)} · updated {ago(d.fetched_at)}</div>
+      </div>
+      <div className="btn-row">
+        <button className={`btn btn-sm ${ctx.layers.photoreal ? 'btn-primary' : 'btn-ghost'}`} onClick={() => {
+          const on = !ctx.layers.photoreal; ctx.setLayers({ ...ctx.layers, photoreal: on })
+          if (on) ctx.flyTo(d.lon, d.lat, 1100, -32, 20)
+        }}>◳ {ctx.layers.photoreal ? '3D city on' : '3D city view'}</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => ctx.flyTo(d.lon, d.lat, 60000, -60)}>Zoom out</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => { ctx.setPick({ lat: d.lat, lon: d.lon }); ctx.setMode('citizen') }}>✦ Report here</button>
+      </div>
+      <section className="card live">
+        <div className="sec-h"><h3>Right now · measured</h3><span className="muted">Google Air Quality</span></div>
+        {local || uaqi ? (
+          <div className="live-row">
+            {local && <div className="big-idx" style={{ ['--c' as string]: local.color ?? '#9ccc3a' }}><b className="display">{local.aqi}</b><span>{local.name}</span><em>{local.category}</em></div>}
+            {uaqi && <div className="big-idx small" style={{ ['--c' as string]: uaqi.color ?? '#9ccc3a' }}><b className="display">{uaqi.aqi}</b><span>Universal AQI</span><em>{uaqi.category}</em></div>}
+          </div>
+        ) : <div className="muted" style={{ fontSize: 13 }}>Google has no live air-quality coverage here.</div>}
+        {g.pollutants && <div className="pol-row">{Object.entries(g.pollutants).slice(0, 6).map(([k, v]) => <span key={k} className="chip mono">{v.name ?? k} {fmt(v.value, 1)}</span>)}</div>}
+        {g.health && <p className="fine" style={{ color: 'var(--ink-2)' }}>{g.health}</p>}
+      </section>
+      <div className="kv-grid">
+        <div><span>Wind</span><b className="mono">{fmt(d.weather.wind_kmh, 0)} km/h from {d.weather.wind_from_compass ?? '—'}</b></div>
+        <div><span>Temperature · humidity</span><b className="mono">{fmt(d.weather.temp_c, 0)}°C · {fmt(d.weather.rh, 0)}%</b></div>
+        <div><span>Mixing height</span><b className="mono">{fmt(d.weather.mixing_height_m, 0)} m</b></div>
+        <div><span>Heat detections ≤ 50 km</span><b className="mono">{d.fires.within_50km}</b></div>
+        <div><span>Citizen sensors ≤ 10 km</span><b className="mono">{d.citizen_sensors.count}{d.citizen_sensors.median_pm25 != null ? ` · ${d.citizen_sensors.median_pm25} µg` : ''}</b></div>
+        <div><span>Official stations ≤ 25 km</span><b className="mono">{d.stations.source ? d.stations.count : 'n/a'}</b></div>
+      </div>
+      {d.forecast.series && (
+        <section>
+          <div className="sec-h"><h3>Forecast at this exact spot</h3>{f.peak_category && <IndexBadge v={f.peak72} cat={f.peak_category} />}</div>
+          <ForecastChart system={f.system} d={d.forecast.series} height={140} />
+          <p className="fine">{d.forecast.source}. {f.stage && f.stage.stage > 0 ? `Peak would trigger ${f.stage.name}.` : ''}</p>
+        </section>
+      )}
+      <section>
+        <div className="sec-h"><h3>Satellite, today &amp; yesterday</h3><span className="muted">NASA VIIRS · red = heat</span></div>
+        <div className="img-row">
+          {d.imagery.satellite.map((s) => (
+            <figure key={s.date} className="shot" onClick={() => setBig(s.url)}><img src={s.url} alt={`NASA VIIRS true colour ${s.date}`} loading="lazy" /><figcaption>{s.label} · {s.date}</figcaption></figure>
+          ))}
+        </div>
+      </section>
+      {sv.available && svOk && (
+        <section>
+          <div className="sec-h"><h3>Street level</h3><span className="muted">Google Street View · {sv.date}</span></div>
+          <figure className="shot wide" onClick={() => setBig(`/api/streetview?lat=${sv.lat}&lon=${sv.lon}`)}>
+            <img src={`/api/streetview?lat=${sv.lat}&lon=${sv.lon}`} alt="Street View near this point" loading="lazy" onError={() => setSvOk(false)} />
+            <figcaption>Nearest imagery · captured {sv.date} (not live)</figcaption>
+          </figure>
+        </section>
+      )}
+      {d.fires.nearest.length > 0 && (
+        <section>
+          <div className="sec-h"><h3>Nearest heat detections</h3><span className="muted">NASA FIRMS, 24 h</span></div>
+          <div className="list">
+            {d.fires.nearest.slice(0, 5).map((x, i) => (
+              <button key={i} className="row" onClick={() => ctx.flyTo(x.lon, x.lat, 3500, -45)}>
+                <span className="dot" style={{ background: '#ff8a3d' }} />
+                <div className="row-main"><div className="row-t">{x.km} km {x.dir}</div><div className="row-s">{x.frp.toFixed(1)} MW · {x.hours_ago} h ago</div></div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      <button className="btn btn-primary" style={{ justifyContent: 'center' }} onClick={() => {
+        ctx.setDraftFor({ kind: 'place', lat: d.lat, lon: d.lon, label: name, suggested: d.languages }); ctx.setMode('command')
+      }}>▲ Draft alert for this place</button>
+      <p className="fine">Authority: {d.authority}. Every number above carries its source; nothing is estimated unless labelled forecast.</p>
+      {big && <div className="lightbox" onClick={() => setBig(null)}><img src={big} alt="" /></div>}
+    </div>
+  )
+}
+
 /* ================================================================ CITIZEN */
-const LANG_CHOICES = ['hi', 'en', 'pa', 'bn', 'ta', 'te', 'mr', 'gu', 'kn', 'ml', 'or', 'ur', 'as']
+const LANG_CHOICES = ['en', 'hi', 'pa', 'bn', 'ta', 'te', 'mr', 'gu', 'kn', 'ml', 'or', 'ur', 'as', 'zh', 'es', 'pt', 'fr', 'ar', 'id', 'sw', 'ru', 'de', 'ja', 'ko', 'vi', 'th', 'tr']
 
 export function CitizenPanel({ ctx }: { ctx: Ctx }) {
   const [photos, setPhotos] = useState<File[]>([])
@@ -331,15 +463,14 @@ export function CitizenPanel({ ctx }: { ctx: Ctx }) {
   const [err, setErr] = useState<string | null>(null)
   const [result, setResult] = useState<Report | null>(null)
   const rec = useRef<MediaRecorder | null>(null)
-  const steps = ['Uploading evidence', 'Gemini reads the photo & listens to the voice note', 'Cross-checking NASA satellite fires nearby', 'Checking other reports & modelled PM2.5', 'Resolving jurisdiction (Google Maps)', 'Tracing where the smoke goes next']
+  const steps = ['Uploading evidence', 'Gemini reads the photo & listens to the voice note', 'Cross-checking NASA heat detections nearby', 'Checking other reports & forecast PM2.5', 'Resolving jurisdiction (Google Maps)', 'Tracing where the smoke goes next']
   const at = useSteps(busy, steps, 1900)
+  const elapsed = useElapsed(busy)
   const selected = ctx.reports.find((r) => r.id === ctx.selectedReport)
   const shown = result ?? selected ?? null
 
   useEffect(() => { if (shown?.downwind?.paths) ctx.setPlume(shown.downwind.paths) }, [shown]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (selected) ctx.flyTo(selected.lon, selected.lat, 8, 50)
-  }, [selected?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (selected) ctx.flyTo(selected.lon, selected.lat, 25000, -50) }, [selected?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function toggleRecord() {
     if (recording) { rec.current?.stop(); return }
@@ -352,15 +483,13 @@ export function CitizenPanel({ ctx }: { ctx: Ctx }) {
       mr.start(); rec.current = mr; setRecording(true)
     } catch { setErr('Microphone permission denied.') }
   }
-
   function locate() {
     navigator.geolocation?.getCurrentPosition(
-      (p) => { ctx.setPick({ lat: p.coords.latitude, lon: p.coords.longitude }); ctx.flyTo(p.coords.longitude, p.coords.latitude, 9, 45) },
+      (p) => { ctx.setPick({ lat: p.coords.latitude, lon: p.coords.longitude }); ctx.flyTo(p.coords.longitude, p.coords.latitude, 20000, -50) },
       () => ctx.setPickMode(true), { timeout: 8000 })
   }
-
   async function submit() {
-    if (!ctx.pick) { setErr('Set the location first — use GPS or tap the map.'); return }
+    if (!ctx.pick) { setErr('Set the location first — use GPS or tap the globe.'); return }
     setBusy(true); setErr(null); setResult(null)
     const fd = new FormData()
     fd.append('lat', String(ctx.pick.lat)); fd.append('lon', String(ctx.pick.lon)); fd.append('text', text); fd.append('lang', lang)
@@ -374,17 +503,16 @@ export function CitizenPanel({ ctx }: { ctx: Ctx }) {
   }
 
   if (shown && !busy) return <ReportResult ctx={ctx} r={shown} onNew={() => { setResult(null); ctx.setSelectedReport(null); ctx.setPlume(null) }} />
-
   return (
     <div className="stack">
-      <p className="lede">Anyone can be a sensor. Snap a photo, speak in your own language — Gemini works out what's burning, satellites verify it, and it reaches the official who can stop it.</p>
+      <p className="lede">Anyone, anywhere, can be a sensor. Snap a photo or speak in your own language — Gemini works out what's burning, satellites check it, and it reaches the official who can stop it.</p>
       <div className="capture">
         <label className="cap-tile">
           <input type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => setPhotos([...(e.target.files ?? [])].slice(0, 3))} />
           <span className="cap-ic">◐</span><b>{photos.length ? `${photos.length} photo${photos.length > 1 ? 's' : ''}` : 'Photo'}</b><span className="muted">camera or gallery</span>
         </label>
         <button className={`cap-tile ${recording ? 'rec' : ''}`} onClick={toggleRecord}>
-          <span className="cap-ic">{recording ? '■' : '●'}</span><b>{recording ? 'Recording…' : voice ? 'Voice note ✓' : 'Voice'}</b><span className="muted">any Indian language</span>
+          <span className="cap-ic">{recording ? '■' : '●'}</span><b>{recording ? 'Recording…' : voice ? 'Voice note ✓' : 'Voice'}</b><span className="muted">any language</span>
         </button>
       </div>
       <label className="linkish" style={{ justifySelf: 'start', cursor: 'pointer' }}>
@@ -395,14 +523,14 @@ export function CitizenPanel({ ctx }: { ctx: Ctx }) {
       <textarea className="input" rows={3} placeholder="Optional: describe what you see — in any language" value={text} onChange={(e) => setText(e.target.value)} />
       <div className="btn-row">
         <select className="select" value={lang} onChange={(e) => setLang(e.target.value)} aria-label="Your language">
-          {LANG_CHOICES.map((l) => <option key={l} value={l}>{LANG_NAMES[l]}</option>)}
+          {LANG_CHOICES.map((l) => <option key={l} value={l}>{LANG_NAMES[l] ?? l}</option>)}
         </select>
-        <button className="btn btn-ghost btn-sm" onClick={locate}>⌖ Use my location</button>
-        <button className={`btn btn-ghost btn-sm ${ctx.pickMode ? 'on' : ''}`} onClick={() => ctx.setPickMode(!ctx.pickMode)}>Tap on map</button>
+        <button className="btn btn-ghost btn-sm" onClick={locate}>⌖ My location</button>
+        <button className={`btn btn-ghost btn-sm ${ctx.pickMode ? 'on' : ''}`} onClick={() => ctx.setPickMode(!ctx.pickMode)}>Tap globe</button>
       </div>
       {ctx.pick && <div className="muted mono" style={{ fontSize: 12 }}>📍 {ctx.pick.lat.toFixed(4)}, {ctx.pick.lon.toFixed(4)}</div>}
       <button className="btn btn-primary" disabled={busy} onClick={submit} style={{ justifyContent: 'center' }}>{busy ? 'Analysing…' : 'Send report'}</button>
-      {busy && <StepList steps={steps} at={at} />}
+      {busy && <StepList steps={steps} at={at} elapsed={elapsed} />}
       {err && <div className="err">{err}</div>}
       <section>
         <div className="sec-h"><h3>Recent reports</h3><span className="muted">{ctx.reports.length}</span></div>
@@ -410,10 +538,7 @@ export function CitizenPanel({ ctx }: { ctx: Ctx }) {
           {ctx.reports.slice(0, 12).map((r) => (
             <button key={r.id} className="row" onClick={() => ctx.setSelectedReport(r.id)}>
               {r.thumb ? <img className="row-img" src={r.thumb} alt="" /> : <span className="row-img ph">✦</span>}
-              <div className="row-main">
-                <div className="row-t">{r.analysis.source_label}</div>
-                <div className="row-s">{r.jurisdiction.locality || r.jurisdiction.city} · {ago(r.created_at)}</div>
-              </div>
+              <div className="row-main"><div className="row-t">{r.analysis.source_label}</div><div className="row-s">{r.jurisdiction.locality || r.jurisdiction.city} · {ago(r.created_at)}</div></div>
               <span className={`status s-${r.verification.status}`}>{r.verification.status}</span>
             </button>
           ))}
@@ -425,10 +550,9 @@ export function CitizenPanel({ ctx }: { ctx: Ctx }) {
 }
 
 function ReportResult({ ctx, r, onNew }: { ctx: Ctx; r: Report; onNew: () => void }) {
-  const a = r.analysis, v = r.verification
+  const a = r.analysis, v = r.verification, sig = v.signals
   const [audio, setAudio] = useState<string | null>(null)
   const [speaking, setSpeaking] = useState(false)
-  const sig = v.signals
   return (
     <div className="stack">
       <button className="back" onClick={onNew}>← New report</button>
@@ -448,17 +572,19 @@ function ReportResult({ ctx, r, onNew }: { ctx: Ctx; r: Report; onNew: () => voi
           <div><span>Gemini confidence</span><meter min={0} max={1} value={sig.ai_confidence} /><b className="mono">{Math.round(sig.ai_confidence * 100)}%</b></div>
           <div><span>Satellite corroboration</span><meter min={0} max={1} value={sig.satellite} /><b className="mono">{Math.round(sig.satellite * 100)}%</b></div>
           <div><span>Nearby matching reports</span><meter min={0} max={2} value={sig.peer_reports} /><b className="mono">{sig.peer_reports}</b></div>
-          <div><span>Authentic real photo</span><span>{sig.authentic ? '✓' : '✕'}</span><span /></div>
+          <div><span>Real photo (not a drawing/AI)</span><span>{sig.authentic ? '✓ yes' : '✕ no'}</span><span /></div>
         </div>
-        {v.nearby_fires[0] && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Nearest VIIRS fire: {v.nearby_fires[0].km} km, {v.nearby_fires[0].hours_ago} h ago, {v.nearby_fires[0].frp} MW</div>}
-        {a.authenticity_notes && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{a.authenticity_notes}</div>}
+        {v.nearby_fires[0] && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Nearest NASA heat detection: {v.nearby_fires[0].km} km, {v.nearby_fires[0].hours_ago} h ago, {v.nearby_fires[0].frp} MW</div>}
       </section>
       <section className="card">
         <div className="sec-h"><h3>Routed to</h3></div>
         <div className="display" style={{ fontSize: 18 }}>{r.jurisdiction.route_to}</div>
         <div className="muted" style={{ fontSize: 13 }}>{[r.jurisdiction.locality, r.jurisdiction.district, r.jurisdiction.state].filter(Boolean).join(' · ')}</div>
         {r.downwind.cities.length > 0 && <div style={{ marginTop: 8 }}>Smoke heads toward <b>{r.downwind.cities.map((c) => `${c.name} (~${c.eta_h} h)`).join(', ')}</b></div>}
-        <button className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={() => { ctx.setDraftFor({ kind: 'report', report_id: r.id }); ctx.setMode('command') }}>▲ Escalate as action order</button>
+        <div className="btn-row" style={{ marginTop: 10 }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => ctx.openPlace(r.lat, r.lon, 9000)}>⌖ Live view</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => { ctx.setDraftFor({ kind: 'report', report_id: r.id, label: a.source_label }); ctx.setMode('command') }}>▲ Escalate as order</button>
+        </div>
       </section>
       <section className="reply">
         <div className="eyebrow">Reply to citizen · {LANG_NAMES[a.language_detected] ?? a.language_detected}</div>
@@ -477,16 +603,16 @@ export function ForecastPanel({ ctx }: { ctx: Ctx }) {
   if (!ctx.corridors.length) return <Loading lines={6} label="Building corridor forecasts…" />
   return (
     <div className="stack">
-      <p className="lede">Pollution doesn't respect city limits. Six economic corridors, 72 hours ahead, every 6 hours — so a spike in Ludhiana warns Delhi before it arrives.</p>
+      <p className="lede">Pollution doesn't respect city limits. India's six economic corridors, 72 hours ahead, every 6 hours — so a spike in Ludhiana warns Delhi before it arrives.</p>
       {ctx.corridors.map((c) => (
         <div key={c.id} className="card corridor" onClick={() => {
           const lons = c.path.map((p) => p[0]), lats = c.path.map((p) => p[1])
           const span = Math.max(Math.max(...lons) - Math.min(...lons), Math.max(...lats) - Math.min(...lats))
-          ctx.flyTo((Math.min(...lons) + Math.max(...lons)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2 - span * 0.1, Math.max(4, 7.5 - Math.log2(span + 1) * 1.3), 35)
+          ctx.flyTo((Math.min(...lons) + Math.max(...lons)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2, Math.max(4e5, span * 1.6e5), -60)
         }}>
           <div className="sec-h">
             <div><h3>{c.name}</h3><div className="muted" style={{ fontSize: 12 }}>{c.kind} · {fmt(c.pop_m, 1)} M people · {c.strip.length} cities</div></div>
-            <NaqiBadge v={c.peak72} />
+            <IndexBadge v={c.peak72} cat={c.peak_category} />
           </div>
           <div className="strip">
             <div className="strip-head mono"><span />{c.strip[0]?.cells.map((x) => <span key={x.h}>{x.h === 0 ? 'now' : `+${x.h}`}</span>)}</div>
@@ -497,7 +623,7 @@ export function ForecastPanel({ ctx }: { ctx: Ctx }) {
               </div>
             ))}
           </div>
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>{c.blurb} Worst: <b style={{ color: 'var(--ink)' }}>{c.worst_city}</b> around {istTime(c.worst_time)}.</div>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>{c.blurb} Worst: <b style={{ color: 'var(--ink)' }}>{c.worst_city}</b> around {istTime(c.worst_time)} IST.</div>
         </div>
       ))}
     </div>
@@ -506,39 +632,68 @@ export function ForecastPanel({ ctx }: { ctx: Ctx }) {
 
 /* ================================================================ COMMAND */
 const FLOW = ['draft', 'approved', 'dispatched', 'acknowledged', 'resolved']
+const ALL_LANGS = Object.keys(LANG_NAMES)
 
-export function CommandPanel({ ctx }: { ctx: Ctx }) {
+function Composer({ ctx, target, onDone, onCancel }: { ctx: Ctx; target: DraftFor; onDone: (a: Alert) => void; onCancel: () => void }) {
+  const city = target.city ? ctx.cities.find((c) => c.id === target.city) : null
+  const [langs, setLangs] = useState<string[]>(() => {
+    const local = target.suggested ?? (city ? (city.india ? ctx.meta?.states?.[city.state]?.languages : ctx.meta?.country_languages?.[city.country]) ?? [] : [])
+    return ['en', ...local.filter((l) => l !== 'en')].slice(0, 3)
+  })
+  const [imagery, setImagery] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [open, setOpen] = useState<Alert | null>(null)
-  const steps = ['Assembling forecast, sources & jurisdiction', 'Gemini drafts the GRAP-aligned order', 'Writing advisories in local languages', 'Human review required before dispatch']
-  const at = useSteps(busy, steps, 2600)
-
-  async function draft(body: NonNullable<Ctx['draftFor']>) {
-    setBusy(true); setErr(null); setOpen(null)
-    try { const a = await api.draftAlert(body); setOpen(a); await ctx.refreshAlerts() } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  const elapsed = useElapsed(busy)
+  const steps = ['Assembling forecast, sources & jurisdiction', imagery ? 'Fetching today’s NASA satellite image; Gemini reads it' : 'Skipping imagery', 'Gemini drafts the order', 'Writing advisories: ' + langs.map((l) => LANG_NAMES[l] ?? l).join(', ')]
+  const at = useSteps(busy, steps, 5500)
+  async function go() {
+    setBusy(true); setErr(null)
+    const body: DraftBody = { kind: target.kind, city: target.city, report_id: target.report_id, lat: target.lat, lon: target.lon, languages: langs, attach_imagery: imagery }
+    try { onDone(await api.draftAlert(body)) } catch (e) {
+      setErr((e as Error).name === 'AbortError' ? 'The AI took too long (over 95 s). Please retry — a faster model is used automatically.' : (e as Error).message)
+    } finally { setBusy(false) }
   }
-  useEffect(() => {
-    if (ctx.draftFor) { const d = ctx.draftFor; ctx.setDraftFor(null); draft(d) }
-  }, [ctx.draftFor]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="card focus-gold">
+      <div className="sec-h"><h3>New order · {target.label ?? target.kind}</h3><button className="x" onClick={onCancel} aria-label="Cancel">×</button></div>
+      <div className="eyebrow">Languages (English + local, up to 4)</div>
+      <div className="chips-row">
+        {langs.map((l) => <button key={l} className="chip chip-btn on" onClick={() => setLangs(langs.filter((x) => x !== l))} title="Remove">{LANG_NAMES[l] ?? l} ×</button>)}
+        {langs.length < 4 && (
+          <select className="select mini-select" value="" onChange={(e) => e.target.value && setLangs([...langs, e.target.value])} aria-label="Add language">
+            <option value="">+ add</option>
+            {ALL_LANGS.filter((l) => !langs.includes(l)).map((l) => <option key={l} value={l}>{LANG_NAMES[l]}</option>)}
+          </select>
+        )}
+      </div>
+      <label className="check"><input type="checkbox" checked={imagery} onChange={(e) => setImagery(e.target.checked)} /> Attach today’s NASA satellite image (Gemini describes it)</label>
+      {busy ? <StepList steps={steps} at={at} elapsed={elapsed} /> : <button className="btn btn-primary" style={{ justifyContent: 'center' }} disabled={!langs.length} onClick={go}>✦ Draft with Gemini</button>}
+      {err && <div className="err">{err} <button className="btn btn-ghost btn-sm" onClick={go}>Retry</button></div>}
+    </div>
+  )
+}
 
-  const spikes = ctx.cities.filter((c) => c.spike).sort((a, b) => b.spike!.peak - a.spike!.peak).slice(0, 6)
+export function CommandPanel({ ctx }: { ctx: Ctx }) {
+  const [open, setOpen] = useState<Alert | null>(null)
+  const [target, setTarget] = useState<DraftFor | null>(null)
+  useEffect(() => { if (ctx.draftFor) { setTarget(ctx.draftFor); setOpen(null); ctx.setDraftFor(null) } }, [ctx.draftFor]) // eslint-disable-line react-hooks/exhaustive-deps
+  const spikes = ctx.cities.filter((c) => c.spike).sort((a, b) => b.spike!.peak_category.level - a.spike!.peak_category.level || b.spike!.peak - a.spike!.peak).slice(0, 8)
   if (open) return <AlertView ctx={ctx} a={open} onBack={() => setOpen(null)} onUpdate={setOpen} />
   return (
     <div className="stack">
-      <p className="lede">From forecast to action in one click. Gemini drafts the order and the public advisories; a human officer approves, dispatches and closes the loop — every step on a public ledger.</p>
-      {busy && <StepList steps={steps} at={at} />}
-      {err && <div className="err">{err}</div>}
+      <p className="lede">From forecast to action. Gemini drafts the order and public advisories in English and local languages, with today's satellite image as evidence; a human officer approves every dispatch.</p>
+      {target && <Composer ctx={ctx} target={target} onCancel={() => setTarget(null)} onDone={(a) => { setTarget(null); setOpen(a); ctx.refreshAlerts() }} />}
       <section>
-        <div className="sec-h"><h3>Needs action</h3><span className="muted">forecast spikes</span></div>
+        <div className="sec-h"><h3>Needs action</h3><span className="muted">forecast spikes worldwide</span></div>
         <div className="list">
           {spikes.map((c) => (
             <div key={c.id} className="row">
-              <span className="dot" style={{ background: naqiColor(c.spike!.peak) }} />
-              <div className="row-main"><div className="row-t">{c.name}</div><div className="row-s">{c.spike!.grap.name} in ~{c.spike!.lead_hours} h · {c.authority.primary_short}</div></div>
-              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => draft({ kind: 'city', city: c.id })}>Draft</button>
+              <span className="dot" style={{ background: c.spike!.peak_category.color }} />
+              <div className="row-main"><div className="row-t">{c.name} <span className="muted">· {c.india ? c.state_name : c.country_name}</span></div><div className="row-s">{c.spike!.grap.name} in ~{c.spike!.lead_hours} h · {c.authority.primary_short}</div></div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setTarget({ kind: 'city', city: c.id, label: c.name })}>Draft</button>
             </div>
           ))}
+          {!spikes.length && <div className="muted" style={{ fontSize: 13 }}>No forecast spikes. Draft for any place from its live view (click the globe).</div>}
         </div>
       </section>
       <section>
@@ -547,7 +702,7 @@ export function CommandPanel({ ctx }: { ctx: Ctx }) {
           {ctx.alerts.map((a) => (
             <button key={a.id} className="row" onClick={() => setOpen(a)}>
               <span className={`sev-dot sev-${a.draft.severity}`} />
-              <div className="row-main"><div className="row-t">{a.draft.title}</div><div className="row-s">{a.target.name} · {ago(a.created_at)}</div></div>
+              <div className="row-main"><div className="row-t">{a.draft.title}</div><div className="row-s">{a.target.name} · {a.languages.map((l) => LANG_NAMES[l] ?? l).join(', ')} · {ago(a.created_at)}</div></div>
               <span className={`status s-${a.status}`}>{a.status}</span>
             </button>
           ))}
@@ -560,31 +715,49 @@ export function CommandPanel({ ctx }: { ctx: Ctx }) {
 
 function AlertView({ ctx, a, onBack, onUpdate }: { ctx: Ctx; a: Alert; onBack: () => void; onUpdate: (a: Alert) => void }) {
   const d = a.draft
-  const [lang, setLang] = useState(d.advisories[0]?.lang ?? 'en')
+  const [lang, setLang] = useState(d.advisories.find((x) => x.lang === 'en')?.lang ?? d.advisories[0]?.lang ?? 'en')
   const [speaking, setSpeaking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [big, setBig] = useState<string | null>(null)
   const adv = d.advisories.find((x) => x.lang === lang) ?? d.advisories[0]
   const idx = FLOW.indexOf(a.status)
   const next = idx >= 0 && idx < FLOW.length - 1 ? FLOW[idx + 1] : null
   const verb: Record<string, string> = { approved: 'Approve', dispatched: 'Dispatch', acknowledged: 'Mark acknowledged', resolved: 'Mark resolved' }
+  const ai = a.evidence?.find((e) => e.ai)?.ai
   return (
     <div className="stack">
       <button className="back" onClick={onBack}>← Ledger</button>
       <div>
         <span className={`sev-pill sev-${d.severity}`}>{d.severity}</span>
         <div className="display" style={{ fontSize: 24, lineHeight: 1.15, marginTop: 8 }}>{d.title}</div>
-        <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>To: {String((a as unknown as { context: { authority: string } }).context?.authority ?? '')}</div>
+        <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>To: {a.context?.authority ?? '—'}</div>
       </div>
       <div className="flow">{FLOW.map((s, i) => <div key={s} className={i <= idx ? 'on' : ''}><i />{s}</div>)}</div>
       <p style={{ margin: 0 }}>{d.situation}</p>
+      {!!a.evidence?.length && (
+        <section>
+          <div className="sec-h"><h3>Evidence attached</h3><span className="muted">live imagery</span></div>
+          <div className="img-row">
+            {a.evidence.map((e, i) => (
+              <figure key={i} className="shot" onClick={() => setBig(e.url)}>
+                <img src={e.url} alt={e.source} loading="lazy" />
+                <figcaption>{e.kind === 'satellite' ? `NASA VIIRS · ${e.date}` : `Street View · ${e.date ?? ''}`}</figcaption>
+              </figure>
+            ))}
+          </div>
+          {ai && (
+            <div className="quote" style={{ marginTop: 8 }}><div className="eyebrow">Gemini reads the satellite image</div>{ai.observation}
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>smoke visible: {ai.visible_smoke ? 'yes' : 'no'} · haze: {ai.visible_haze ? 'yes' : 'no'} · clouds: {ai.cloud_cover}</div></div>
+          )}
+        </section>
+      )}
       <section className="card">
         <div className="sec-h"><h3>Ordered actions</h3></div>
         <div className="actions">
           {d.actions.map((x, i) => (
-            <div key={i} className="action">
-              <span className="mono num-b">{i + 1}</span>
+            <div key={i} className="action"><span className="mono num-b">{i + 1}</span>
               <div><div className="row-t">{x.action}</div><div className="row-s">{x.owner}{x.why ? ` — ${x.why}` : ''}</div></div>
-              <span className="chip mono">≤ {x.within_hours} h</span>
-            </div>
+              <span className="chip mono">≤ {x.within_hours} h</span></div>
           ))}
         </div>
       </section>
@@ -594,26 +767,24 @@ function AlertView({ ctx, a, onBack, onUpdate }: { ctx: Ctx; a: Alert; onBack: (
         </div>
         {adv && <div className="bubble" dangerouslySetInnerHTML={{ __html: mdLite(adv.text) }} />}
         <button className="btn btn-ghost btn-sm" disabled={speaking || !adv} onClick={async () => {
-          try { setSpeaking(true); const u = await api.tts(adv!.text); await new Audio(u).play() } catch { /* optional */ } finally { setSpeaking(false) }
+          try { setSpeaking(true); const u = await api.tts(adv!.text.slice(0, 850)); await new Audio(u).play() } catch { /* optional */ } finally { setSpeaking(false) }
         }}>{speaking ? 'Synthesising…' : '▶ Play voice advisory (IVR / radio)'}</button>
       </section>
-      <section className="phone">
-        <div className="eyebrow">SMS · Cell broadcast preview</div>
-        <div className="sms">{d.sms}</div>
-      </section>
+      <section className="phone"><div className="eyebrow">SMS · cell broadcast preview</div><div className="sms">{d.sms}</div></section>
       {d.review_note && <div className="callout warn"><b>Officer check:</b> {d.review_note}</div>}
       {next && (
-        <button className="btn btn-primary" style={{ justifyContent: 'center' }} onClick={async () => { const u = await api.alertStatus(a.id, next); onUpdate(u); ctx.refreshAlerts() }}>
-          {verb[next]} →
-        </button>
+        <button className="btn btn-primary" style={{ justifyContent: 'center' }} disabled={busy} onClick={async () => {
+          setBusy(true); try { const u = await api.alertStatus(a.id, next); onUpdate(u); ctx.refreshAlerts() } finally { setBusy(false) }
+        }}>{busy ? '…' : `${verb[next]} →`}</button>
       )}
       <section>
         <div className="sec-h"><h3>Ledger</h3></div>
         <ol className="ledger">
-          {a.timeline.map((t, i) => <li key={i}><b>{t.status}</b> · {t.by} · <span className="muted">{istTime(t.at)}</span>{t.channels && <div className="muted" style={{ fontSize: 12 }}>{t.channels.join(' · ')}</div>}</li>)}
+          {a.timeline.map((t, i) => <li key={i}><b>{t.status}</b> · {t.by} · <span className="muted">{istTime(t.at)} IST</span>{t.channels && <div className="muted" style={{ fontSize: 12 }}>{t.channels.join(' · ')}</div>}</li>)}
         </ol>
       </section>
       <AiTag model={a.ai.model} ms={a.ai.ms} />
+      {big && <div className="lightbox" onClick={() => setBig(null)}><img src={big} alt="" /></div>}
     </div>
   )
 }
@@ -623,54 +794,59 @@ export function CommonsPanel({ ctx }: { ctx: Ctx }) {
   const c = ctx.commons
   const [dp, setDp] = useState(0)
   const [busy, setBusy] = useState(false)
-  useEffect(() => { ctx.flyTo(80.5, 20.5, 3.9, 30) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { ctx.flyTo(40, 20, 2.1e7, -90) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   if (!c) return <Loading lines={6} label="Loading the federated Model Commons…" />
   const s = c.summary
+  const groups = new Map<string, typeof c.nodes>()
+  for (const n of c.nodes) { const k = n.federation ?? 'Global'; groups.set(k, [...(groups.get(k) ?? []), n]) }
   return (
     <div className="stack">
-      <p className="lede">Global forecasts miss local reality. Each state trains on its own ground truth and shares <b>only model weights</b> — never raw data. The federation beats every state going alone.</p>
+      <p className="lede">Global forecasts miss local reality — and the error is different in every region. Each state or country trains on its own ground truth and shares <b>only model weights</b>. Regions federate; every node personalises.</p>
       <div className="stats-2">
-        <Stat value={`−${s.improvement_pct}%`} label="forecast error vs global CAMS model" tone="var(--albedo)" />
-        <Stat value={`−${s.zero_data_improvement_pct}%`} label="for a state that shares zero data (leave-one-out)" tone="var(--wind)" />
-        <Stat value={`${s.nodes}`} label="state nodes" />
-        <Stat value={`${fmt(s.raw_bytes_kept_local / 1024, 0)} KB`} label={`raw data kept local · ${fmt(s.bytes_shared / 1024, 0)} KB weights shared`} />
+        <Stat value={`−${s.improvement_pct}%`} label="forecast error vs the global model (federated + personalised)" tone="var(--albedo)" />
+        <Stat value={`−${s.zero_data_improvement_pct}%`} label="for a node that shares no data at all (borrows its federation)" tone="var(--wind)" />
+        <Stat value={`${s.nodes}`} label={`nodes in ${Object.keys(s.federations ?? {}).length || 1} regional federations`} />
+        <Stat value={`${fmt(s.raw_bytes_kept_local / 1024, 0)} KB`} label={`raw data never leaves its node · ${fmt(s.bytes_shared / 1024, 0)} KB of weights shared`} />
       </div>
       <section>
-        <div className="sec-h"><h3>Mean abs. error, PM2.5 (µg/m³)</h3><span className="muted">held-out 18 h, lower is better</span></div>
+        <div className="sec-h"><h3>Mean abs. error, PM2.5 (µg/m³)</h3><span className="muted">held-out 18 h · lower is better</span></div>
         <HBars rows={[
           { label: 'Global model (CAMS)', value: s.mae_cams },
-          { label: 'Each state alone', value: s.mae_local, note: 'too little data' },
-          { label: 'Federated', value: s.mae_federated, accent: true },
+          ...(s.mae_global != null ? [{ label: 'One planet-wide model', value: s.mae_global, note: 'biases differ by region' }] : []),
+          { label: 'Regional federations', value: s.mae_federated, accent: true },
+          { label: 'Each node alone', value: s.mae_local },
           { label: 'Federated + personalised', value: s.mae_personalised, accent: true },
-          { label: 'Zero-data state (served by federation)', value: s.mae_zero_data, accent: true },
-        ]} unit="" />
+          { label: 'Node with zero data', value: s.mae_zero_data, accent: true },
+        ]} />
       </section>
       <section>
         <div className="sec-h"><h3>Convergence</h3><span className="muted">{s.rounds} FedAvg rounds · {s.train_ms} ms</span></div>
         <RoundsChart rounds={c.rounds} baseline={s.mae_cams} />
       </section>
       <section className="card">
-        <div className="sec-h"><h3>Retrain the federation</h3></div>
+        <div className="sec-h"><h3>Retrain the federations</h3></div>
         <label className="slider">Differential-privacy noise σ <b className="mono">{dp.toFixed(2)}</b>
           <input type="range" min={0} max={0.1} step={0.01} value={dp} onChange={(e) => setDp(+e.target.value)} />
         </label>
-        <button className="btn btn-primary btn-sm" disabled={busy} onClick={async () => {
-          setBusy(true); try { ctx.setCommons(await api.train(30, dp)); await ctx.reloadPulse() } finally { setBusy(false) }
-        }}>{busy ? 'Training 21 nodes…' : '⬡ Run 30 rounds'}</button>
+        <button className="btn btn-primary btn-sm" disabled={busy} onClick={async () => { setBusy(true); try { ctx.setCommons(await api.train(30, dp)); await ctx.reloadPulse() } finally { setBusy(false) } }}>{busy ? `Training ${s.nodes} nodes…` : '⬡ Run 30 rounds'}</button>
       </section>
       <section>
-        <div className="sec-h"><h3>Nodes</h3><span className="muted">global model bias → corrected</span></div>
-        <div className="nodes">
-          <div className="node head mono"><span>State</span><span>bias</span><span>CAMS</span><span>Fed.</span></div>
-          {[...c.nodes].sort((a, b) => b.mae_cams - a.mae_cams).map((n) => (
-            <div key={n.state} className="node">
-              <span>{n.name} <span className="muted">({n.authority})</span></span>
-              <span className="mono" style={{ color: n.bias_cams > 0 ? '#f08a24' : '#6fe3ff' }}>{n.bias_cams > 0 ? '+' : ''}{n.bias_cams}</span>
-              <span className="mono muted">{n.mae_cams}</span>
-              <span className="mono" style={{ color: n.mae_personalised < n.mae_cams ? 'var(--good)' : 'var(--ink-2)' }}>{n.mae_personalised}</span>
+        <div className="sec-h"><h3>Federations</h3><span className="muted">global-model bias → corrected error</span></div>
+        {[...groups.entries()].sort((a, b) => b[1].length - a[1].length).map(([g, nodes]) => (
+          <div key={g} className="fed-group">
+            <div className="eyebrow" style={{ margin: '10px 0 4px' }}>{g} · {nodes.length}</div>
+            <div className="nodes">
+              {[...nodes].sort((a, b) => b.mae_cams - a.mae_cams).map((n) => (
+                <div key={n.state} className="node">
+                  <span>{n.name} <span className="muted">({n.authority})</span></span>
+                  <span className="mono" style={{ color: n.bias_cams > 0 ? '#f08a24' : '#6fe3ff' }}>{n.bias_cams > 0 ? '+' : ''}{n.bias_cams}</span>
+                  <span className="mono muted">{n.mae_cams}</span>
+                  <span className="mono" style={{ color: n.mae_personalised < n.mae_cams ? 'var(--good)' : 'var(--ink-2)' }}>{n.mae_personalised}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </section>
       <section className="card">
         <div className="sec-h"><h3>Open by design — a Digital Public Good</h3></div>
@@ -679,11 +855,6 @@ export function CommonsPanel({ ctx }: { ctx: Ctx }) {
           <a href="/api/interop/events.geojson" target="_blank" rel="noreferrer">Live OAEP event feed (GeoJSON) ↗</a>
           <a href="/api/commons" target="_blank" rel="noreferrer">Model card + weights (CC-BY-4.0) ↗</a>
         </div>
-        {ctx.meta && (
-          <div className="bricks">
-            {Object.entries(ctx.meta.countries).map(([k, v]) => <span key={k} className={`chip ${v.status === 'live' ? 'live' : ''}`} title={v.note}>{v.name} · {v.status}</span>)}
-          </div>
-        )}
       </section>
     </div>
   )
@@ -697,13 +868,12 @@ export function AskDrawer({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
   const [msgs, setMsgs] = useState<{ role: 'u' | 'a'; text: string; model?: string | null }[]>([])
   const [busy, setBusy] = useState(false)
   const [listening, setListening] = useState(false)
-  const [voiceLang, setVoiceLang] = useState('hi-IN')
+  const [voiceLang, setVoiceLang] = useState('en-IN')
   const srRef = useRef<SR | null>(null)
   const end = useRef<HTMLDivElement>(null)
   useEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [msgs, busy])
   const SRClass = (window as unknown as { SpeechRecognition?: new () => SR; webkitSpeechRecognition?: new () => SR }).SpeechRecognition
     ?? (window as unknown as { webkitSpeechRecognition?: new () => SR }).webkitSpeechRecognition
-
   async function send(text: string) {
     if (!text.trim()) return
     setMsgs((m) => [...m, { role: 'u', text }]); setQ(''); setBusy(true)
@@ -718,11 +888,11 @@ export function AskDrawer({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
     sr.onend = () => setListening(false)
     srRef.current = sr; sr.start(); setListening(true)
   }
-  const samples = ['दिल्ली में कल हवा कैसी रहेगी?', 'Where is Punjab smoke going tonight?', 'சென்னையில் குழந்தைகள் வெளியே விளையாடலாமா?', 'Which cities need GRAP Stage II this week?']
+  const samples = ['दिल्ली में कल हवा कैसी रहेगी?', 'Which cities in the world are heading into unhealthy air this week?', 'சென்னையில் குழந்தைகள் வெளியே விளையாடலாமா?', '¿Cómo está el aire en Ciudad de México hoy?']
   return (
     <div className="ask glass fade-up" role="dialog" aria-label="Ask Albedo">
       <div className="sec-h" style={{ padding: '14px 16px 0' }}>
-        <div><div className="eyebrow">✦ Ask Albedo</div><div className="muted" style={{ fontSize: 12 }}>Any Indian language · type or speak</div></div>
+        <div><div className="eyebrow">✦ Ask Albedo</div><div className="muted" style={{ fontSize: 12 }}>Any language · type or speak</div></div>
         <button className="x" onClick={onClose} aria-label="Close">×</button>
       </div>
       <div className="ask-body scroll-y">
@@ -742,14 +912,12 @@ export function AskDrawer({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
         <div ref={end} />
       </div>
       <form className="ask-in" onSubmit={(e) => { e.preventDefault(); send(q) }}>
-        {SRClass && (
-          <>
-            <select className="select mini" value={voiceLang} onChange={(e) => setVoiceLang(e.target.value)} aria-label="Voice language">
-              {[['hi-IN', 'हि'], ['en-IN', 'EN'], ['ta-IN', 'த'], ['bn-IN', 'বা'], ['te-IN', 'తె'], ['mr-IN', 'म'], ['pa-IN', 'ਪੰ'], ['gu-IN', 'ગુ'], ['kn-IN', 'ಕ'], ['ml-IN', 'മ']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-            <button type="button" className={`mic ${listening ? 'on' : ''}`} onClick={listen} aria-label="Speak">●</button>
-          </>
-        )}
+        {SRClass && (<>
+          <select className="select mini" value={voiceLang} onChange={(e) => setVoiceLang(e.target.value)} aria-label="Voice language">
+            {[['en-IN', 'EN'], ['hi-IN', 'हि'], ['ta-IN', 'த'], ['bn-IN', 'বা'], ['te-IN', 'తె'], ['mr-IN', 'म'], ['pa-IN', 'ਪੰ'], ['es-ES', 'ES'], ['pt-BR', 'PT'], ['fr-FR', 'FR'], ['zh-CN', '中'], ['ar-SA', 'ع']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <button type="button" className={`mic ${listening ? 'on' : ''}`} onClick={listen} aria-label="Speak">●</button>
+        </>)}
         <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about any city, any language…" />
         <button className="btn btn-primary btn-sm" disabled={busy}>Ask</button>
       </form>

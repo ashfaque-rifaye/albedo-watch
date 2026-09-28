@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..registry import CITY_BY_ID, STATES
+from ..registry import CITY_BY_ID, WORLD_COUNTRIES, node_authority, node_name, node_of
 from . import datahub
 
 log = logging.getLogger("albedo.federated")
@@ -62,10 +62,20 @@ class Node:
         return len(self.y)
 
 
+def region_of(node: str) -> str:
+    """Federation a node belongs to: India's states federate together; other countries
+    federate within their world region (biases are regional, not planetary)."""
+    if node.startswith("IN-"):
+        return "India"
+    c = WORLD_COUNTRIES.get(node)
+    return c.region if c else "Global"
+
+
 @dataclass
 class CommonsModel:
     global_w: np.ndarray
     personal: dict[str, np.ndarray]
+    regional: dict[str, np.ndarray] = field(default_factory=dict)
     rounds: list[dict] = field(default_factory=list)
     nodes: list[dict] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
@@ -75,13 +85,16 @@ class CommonsModel:
     def weights_for(self, state: str) -> tuple[np.ndarray, str]:
         if state in self.personal:
             return self.personal[state], "personalised"
+        reg = self.regional.get(region_of(state))
+        if reg is not None:
+            return reg, "federated-global"
         return self.global_w, "federated-global"
 
 
 def _build_nodes(series: dict, truth: dict) -> list[Node]:
     by_state: dict[str, list[str]] = {}
     for cid in truth:
-        by_state.setdefault(CITY_BY_ID[cid].state, []).append(cid)
+        by_state.setdefault(node_of(CITY_BY_ID[cid]), []).append(cid)
     nodes = []
     for st, cids in sorted(by_state.items()):
         X, y, raw, obs = [], [], [], []
@@ -165,41 +178,68 @@ def train(series: dict, truth: dict, rounds: int = 30, local_epochs: int = 15, l
           l2: float = 1e-3, dp_sigma: float = 0.0, personalise_epochs: int = 4) -> CommonsModel:
     nodes = _build_nodes(series, truth)
     if len(nodes) < 2:
-        raise RuntimeError("need ≥2 state nodes with ground truth")
+        raise RuntimeError("need ≥2 nodes with ground truth")
     t0 = time.perf_counter()
-    gw, history = fedavg(nodes, rounds, local_epochs, lr, l2, dp_sigma, track=True)
-    personal = {nd.state: _sgd(gw, nd.X[:nd.n_train], nd.y[:nd.n_train], personalise_epochs, lr, l2) for nd in nodes}
+    gw, _ = fedavg(nodes, rounds, local_epochs, lr, l2, dp_sigma)          # planetary fallback
+
+    groups: dict[str, list[Node]] = {}
+    for nd in nodes:
+        groups.setdefault(region_of(nd.state), []).append(nd)
+    regional: dict[str, np.ndarray] = {}
+    per_round: dict[int, list[tuple[float, int]]] = {}
+    for reg, members in groups.items():
+        if len(members) < 2:
+            continue
+        w, hist = fedavg(members, rounds, local_epochs, lr, l2, dp_sigma, track=True)
+        regional[reg] = w
+        n = sum(m.n for m in members)
+        for h in hist:
+            per_round.setdefault(h["round"], []).append((h["mae"], n))
+    history = [{"round": r, "mae": round(sum(m * n for m, n in v) / sum(n for _, n in v), 2)} for r, v in sorted(per_round.items())]
+
+    def model_for(nd: Node) -> np.ndarray:
+        return regional.get(region_of(nd.state), gw)
+
+    personal = {nd.state: _sgd(model_for(nd), nd.X[:nd.n_train], nd.y[:nd.n_train], personalise_epochs, lr, l2) for nd in nodes}
 
     node_rows = []
     for nd in nodes:
+        reg = region_of(nd.state)
         local_only = _sgd(_w0(), nd.X[:nd.n_train], nd.y[:nd.n_train], rounds * local_epochs, lr, l2)
-        # leave-one-state-out: federation trained WITHOUT this state, applied to it
-        others = [o for o in nodes if o is not nd]
-        loso_w, _ = fedavg(others, rounds, local_epochs, lr, l2, dp_sigma)
-        st = STATES[nd.state]
+        # zero-data test: the node's federation trained WITHOUT it, applied to it
+        peers = [o for o in groups.get(reg, []) if o is not nd]
+        pool = peers if len(peers) >= 1 else [o for o in nodes if o is not nd]
+        loso_w, _ = fedavg(pool, max(10, rounds // 2), local_epochs, lr, l2, dp_sigma)
         node_rows.append({
-            "state": nd.state, "name": st.name, "authority": st.authority_short,
+            "state": nd.state, "name": node_name(nd.state), "authority": node_authority(nd.state),
+            "india": nd.state.startswith("IN-"), "federation": reg if reg in regional else "Global",
             "cities": [CITY_BY_ID[c].name for c in nd.cities], "samples": nd.n,
             "lat": float(np.mean([CITY_BY_ID[c].lat for c in nd.cities])),
             "lon": float(np.mean([CITY_BY_ID[c].lon for c in nd.cities])),
             "mae_cams": round(_raw_mae(nd), 2),
             "mae_local": round(_mae(local_only, nd), 2),
-            "mae_federated": round(_mae(gw, nd), 2),
+            "mae_global": round(_mae(gw, nd), 2),
+            "mae_federated": round(_mae(model_for(nd), nd), 2),
             "mae_personalised": round(_mae(personal[nd.state], nd), 2),
             "mae_zero_data": round(_mae(loso_w, nd), 2),
             "bias_cams": round(float(np.mean(nd.raw - nd.truth)), 1),
             "mean_truth": round(float(np.mean(nd.truth)), 1),
         })
 
-    def avg(key: str) -> float:
-        return round(float(np.average([r[key] for r in node_rows], weights=[r["samples"] for r in node_rows])), 2)
+    def avg(key: str, rows=None) -> float:
+        rows = rows or node_rows
+        return round(float(np.average([r[key] for r in rows], weights=[r["samples"] for r in rows])), 2)
 
     raw_bytes = sum(nd.n * (len(FEATURES) + 1) * 8 for nd in nodes)
     shared_bytes = rounds * len(nodes) * len(FEATURES) * 8 * 2
+    india_rows = [r for r in node_rows if r["india"]]
     summary = {
         "nodes": len(nodes), "samples": sum(nd.n for nd in nodes), "rounds": rounds,
-        "mae_cams": avg("mae_cams"), "mae_local": avg("mae_local"), "mae_federated": avg("mae_federated"),
-        "mae_personalised": avg("mae_personalised"), "mae_zero_data": avg("mae_zero_data"),
+        "federations": {reg: len(m) for reg, m in groups.items() if reg in regional},
+        "mae_cams": avg("mae_cams"), "mae_local": avg("mae_local"), "mae_global": avg("mae_global"),
+        "mae_federated": avg("mae_federated"), "mae_personalised": avg("mae_personalised"), "mae_zero_data": avg("mae_zero_data"),
+        "india": ({k: avg(k, india_rows) for k in ("mae_cams", "mae_local", "mae_federated", "mae_personalised", "mae_zero_data")}
+                  | {"nodes": len(india_rows)}) if india_rows else None,
         "raw_bytes_kept_local": raw_bytes, "bytes_shared": shared_bytes,
         "train_ms": round((time.perf_counter() - t0) * 1000),
         "dp_sigma": dp_sigma,
@@ -213,12 +253,15 @@ def train(series: dict, truth: dict, rounds: int = 30, local_epochs: int = 15, l
                 r[k] = None
     if summary["mae_federated"] is None or summary["mae_cams"] is None:
         raise RuntimeError("federated training diverged")
-    summary["improvement_pct"] = round(100 * (1 - summary["mae_federated"] / max(summary["mae_cams"], 1e-6)), 1)
-    summary["zero_data_improvement_pct"] = round(100 * (1 - (summary["mae_zero_data"] or summary["mae_cams"]) / max(summary["mae_cams"], 1e-6)), 1)
+    base = max(summary["mae_cams"], 1e-6)
+    summary["improvement_pct"] = round(100 * (1 - summary["mae_personalised"] / base), 1)
+    summary["federated_improvement_pct"] = round(100 * (1 - summary["mae_federated"] / base), 1)
+    summary["zero_data_improvement_pct"] = round(100 * (1 - (summary["mae_zero_data"] or base) / base), 1)
     return CommonsModel(
-        global_w=gw, personal=personal, rounds=history, nodes=node_rows, summary=summary,
+        global_w=gw, personal=personal, regional=regional, rounds=history, nodes=node_rows, summary=summary,
         trained_at=time.time(),
-        config={"rounds": rounds, "local_epochs": local_epochs, "lr": lr, "l2": l2, "dp_sigma": dp_sigma},
+        config={"rounds": rounds, "local_epochs": local_epochs, "lr": lr, "l2": l2, "dp_sigma": dp_sigma,
+                "topology": "regional FedAvg federations + per-node personalisation; planetary model as fallback"},
     )
 
 
@@ -263,10 +306,11 @@ def model_card() -> dict:
         return {"status": "training-pending"}
     return {
         "name": "Albedo-Watch PM2.5 bias-correction (federated linear, log-space)",
-        "protocol": "FedAvg + local personalisation", "features": FEATURES,
+        "protocol": "Regional FedAvg federations + per-node personalisation", "features": FEATURES,
+        "regional_weights": {k: [round(float(x), 5) for x in v] for k, v in m.regional.items()},
         "global_weights": [round(float(v), 5) for v in m.global_w],
         "config": m.config, "summary": m.summary, "trained_at": m.trained_at,
         "license": "CC-BY-4.0 (weights) — intended as a Digital Public Good",
-        "intended_use": "Correct global CAMS PM2.5 forecasts toward local station reality across Indian states.",
+        "intended_use": "Correct global CAMS PM2.5 forecasts toward local station reality — Indian states and countries worldwide.",
         "limitations": "72 h training window per node; linear model; Google AQ history used as station-fused truth proxy.",
     }

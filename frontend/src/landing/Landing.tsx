@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
-import type { Commons, Hotspots, Pulse } from '../lib/api'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import type { Overview } from '../lib/api'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
-import { Logo } from '../components/Logo'
+import { Logo, Wordmark } from '../components/Logo'
 import { Globe } from './Globe'
 import './landing.css'
+
+const HeroEarth = lazy(() => import('./HeroEarth'))
 
 /* Film with graceful fallback: if a clip is missing or can't autoplay, the
    animated backdrop underneath keeps the section alive. */
@@ -74,7 +76,8 @@ function Counter({ to, decimals = 0, prefix = '', suffix = '' }: { to: number | 
     io.observe(el)
     return () => io.disconnect()
   }, [to])
-  return <span ref={ref}>{to == null ? '—' : `${prefix}${fmt(v, decimals)}${suffix}`}</span>
+  if (to == null) return <span ref={ref} className="count-wait" aria-label="loading" />
+  return <span ref={ref}>{`${prefix}${fmt(v, decimals)}${suffix}`}</span>
 }
 
 const LOOP = [
@@ -86,23 +89,27 @@ const LOOP = [
 ]
 
 export default function Landing() {
-  const [pulse, setPulse] = useState<Pulse | null>(null)
-  const [hot, setHot] = useState<Hotspots | null>(null)
-  const [commons, setCommons] = useState<Commons | null>(null)
-  const [fires, setFires] = useState<number | null>(null)
+  const [ov, setOv] = useState<Overview | null>(null)
   const [step, setStep] = useState(0)
   const [scrolled, setScrolled] = useState(false)
+  const [earth, setEarth] = useState(false)
+  const [earthReady, setEarthReady] = useState(false)
   useReveal()
 
   useEffect(() => {
-    api.pulse().then(setPulse).catch(() => {})
-    api.hotspots().then(setHot).catch(() => {})
-    api.commons().then((c) => ('summary' in c ? setCommons(c) : null)).catch(() => {})
-    api.fires().then((f) => setFires(f.count)).catch(() => {})
+    let alive = true, tries = 0
+    const load = () => api.overview().then((o) => {
+      if (!alive) return
+      setOv(o)
+      if ((!o.summary || !o.fires || !o.commons) && tries++ < 12) setTimeout(load, 5000)
+    }).catch(() => { if (alive && tries++ < 12) setTimeout(load, 5000) })
+    load()
+    // the real Earth loads after first paint, desktop only (it is a 1 MB 3D engine)
+    const t = setTimeout(() => { if (window.innerWidth > 760) setEarth(true) }, 900)
     if (location.hash) setTimeout(() => document.querySelector(location.hash)?.scrollIntoView(), 400)
     const on = () => setScrolled(window.scrollY > 40)
     window.addEventListener('scroll', on, { passive: true })
-    return () => window.removeEventListener('scroll', on)
+    return () => { alive = false; clearTimeout(t); window.removeEventListener('scroll', on) }
   }, [])
 
   useEffect(() => {
@@ -112,13 +119,14 @@ export default function Landing() {
     return () => io.disconnect()
   }, [])
 
-  const s = pulse?.summary
-  const m = commons?.summary ?? pulse?.model ?? null
+  const s = ov?.summary
+  const m = ov?.commons ?? null
+  const fires = ov?.fires?.count ?? null
 
   return (
     <div className="landing">
       <nav className={`lnav ${scrolled ? 'solid' : ''}`}>
-        <a href="/" className="lbrand"><Logo size={24} /> Albedo-Watch</a>
+        <a href="/" className="lbrand"><Logo size={34} /><Wordmark size={18} /></a>
         <div className="lnav-links">
           <a href="#loop">How it works</a>
           <a href="#citizens">Citizens</a>
@@ -130,13 +138,14 @@ export default function Landing() {
 
       {/* ---------------------------------------------------------- hero */}
       <header className="hero">
-        <Globe />
+        <div className={`hero-globe ${earthReady ? 'fade' : ''}`}><Globe /></div>
+        {earth && <Suspense fallback={null}><HeroEarth onReady={() => setEarthReady(true)} /></Suspense>}
         <Film src="/media/hero.mp4" dim={0.35} />
         <div className="hero-grad" />
         <div className="hero-inner">
-          <div className="eyebrow fade-up" style={{ animationDelay: '.1s' }}>Build with AI · Code for Communities · Clean Air & Climate Resilience</div>
+          <div className="eyebrow fade-up" style={{ animationDelay: '.1s' }}>Built for India · Ready for every city on Earth</div>
           <h1 className="display hero-word fade-up" style={{ animationDelay: '.2s' }}>Albedo-Watch</h1>
-          <p className="hero-sub fade-up" style={{ animationDelay: '.35s' }}>India’s citizen-powered air-intelligence network.<br />Detect the hidden fire. Trace the smoke. Warn the city. Before it breathes.</p>
+          <p className="hero-sub fade-up" style={{ animationDelay: '.35s' }}>A citizen-powered air-intelligence network on a live 3D Earth.<br />Detect the hidden fire. Trace the smoke. Warn the city — before it breathes.</p>
           <div className="hero-cta fade-up" style={{ animationDelay: '.5s' }}>
             <a className="btn btn-primary" href="/app">Enter Mission Control →</a>
             <a className="btn btn-ghost" href="/app?mode=citizen">Report pollution</a>
@@ -144,11 +153,10 @@ export default function Landing() {
         </div>
         <div className="ticker glass fade-up" style={{ animationDelay: '.7s' }}>
           <span className="live-dot" />
-          <span><b>{s ? s.cities : '—'}</b> cities live</span><i />
-          <span><b>{fires != null ? fmt(fires) : '—'}</b> satellite fires · 48 h</span><i />
-          <span><b>{s ? `${fmt(s.pop_covered_m, 0)} M` : '—'}</b> people forecast hourly</span><i />
-          <span><b>{s ? s.spikes_72h : '—'}</b> spike warnings · 72 h</span><i />
-          <span><b>{s ? s.states : '—'}</b> states & UTs</span>
+          <span><b>{s ? s.cities : <i className="count-wait" />}</b> cities</span><i />
+          <span><b>{s ? s.countries : <i className="count-wait" />}</b> countries</span><i />
+          <span><b>{fires != null ? fmt(fires) : <i className="count-wait" />}</b> NASA heat detections · 24 h</span><i />
+          <span><b>{ov?.sensors != null ? fmt(ov.sensors) : <i className="count-wait" />}</b> citizen sensors live</span>
         </div>
       </header>
 
@@ -156,7 +164,7 @@ export default function Landing() {
       <section className="light sect" id="gap">
         <div className="wrap">
           <div className="eyebrow dark">The gap</div>
-          <Statement text="India measures its air in a few hundred places. It breathes it in 1.4 billion. The smoke that chokes a city is born in fields, kilns and bylanes no monitor will ever see." />
+          <Statement text="India measures its air in a few hundred places. It breathes it in 1.4 billion. The planet is no different: the smoke that chokes a city is born in fields, forests, kilns and bylanes no monitor will ever see." />
         </div>
       </section>
 
@@ -168,10 +176,10 @@ export default function Landing() {
             <h2 className="display h2">Not a dashboard of the past.<br /><span className="dim">A read on the next 72 hours.</span></h2>
           </div>
           <div className="big-grid">
-            <div className="big" data-reveal><div className="big-n display"><Counter to={s?.pop_covered_m} suffix=" M" /></div><div className="big-l">people across {s?.cities ?? '—'} cities get an hourly, 72-hour air forecast — {s?.spikes_72h ?? '—'} of those cities are heading into Poor air right now</div></div>
-            <div className="big" data-reveal><div className="big-n display" style={{ color: '#f096ff' }}><Counter to={hot ? hot.unmonitored_share * 100 : null} suffix="%" /></div><div className="big-l">of satellite-and-citizen pollution evidence sits where no official monitor is nearby</div></div>
-            <div className="big" data-reveal><div className="big-n display" style={{ color: 'var(--albedo)' }}><Counter to={m ? m.improvement_pct : null} prefix="−" suffix="%" decimals={1} /></div><div className="big-l">forecast error after 21 states federate — without sharing a byte of raw data</div></div>
-            <div className="big" data-reveal><div className="big-n display" style={{ color: 'var(--ember)' }}><Counter to={fires} /></div><div className="big-l">fire detections from NASA VIIRS scanned in the last 48 hours</div></div>
+            <div className="big" data-reveal><div className="big-n display"><Counter to={s?.pop_covered_m} suffix=" M" /></div><div className="big-l">people in {s?.cities ?? '…'} cities across {s?.countries ?? '…'} countries get an hourly, 72-hour air forecast — {s?.spikes_72h ?? '…'} of those cities are heading into unhealthy air right now</div></div>
+            <div className="big" data-reveal><div className="big-n display" style={{ color: 'var(--ember)' }}><Counter to={fires} /></div><div className="big-l">satellite heat detections worldwide in the last 24 hours (NASA VIIRS) — {ov?.fires ? fmt(ov.fires.large) : '…'} of them intense fires</div></div>
+            <div className="big" data-reveal><div className="big-n display" style={{ color: 'var(--albedo)' }}><Counter to={m ? m.improvement_pct : null} prefix="−" suffix="%" decimals={1} /></div><div className="big-l">forecast error once {m?.nodes ?? '…'} states & countries federate — without sharing a byte of raw data</div></div>
+            <div className="big" data-reveal><div className="big-n display" style={{ color: '#9ccc3a' }}><Counter to={ov?.sensors ?? null} /></div><div className="big-l">open citizen air sensors streaming right now, fused with satellites and forecasts</div></div>
           </div>
         </div>
       </section>
@@ -239,11 +247,11 @@ export default function Landing() {
           <div className="bento">
             <div className="b b-wide" data-reveal>
               <div className="eyebrow">Why federate</div>
-              <p className="b-big">Global forecasts are blind to local reality — this week they over-read Delhi’s PM2.5 by roughly 3×, and the error is different in every state. Each state holds the truth for its own air. Albedo-Watch lets them learn together without surrendering it.</p>
+              <p className="b-big">Global forecasts are blind to local reality — and the error is different in every region: they over-read the Indo-Gangetic plain, under-read others. Each state and country holds the truth for its own air. Albedo-Watch lets them learn together without surrendering it.</p>
             </div>
-            <div className="b" data-reveal><div className="b-n display"><Counter to={m?.nodes} /></div><div className="b-l">state nodes training together</div></div>
-            <div className="b" data-reveal><div className="b-n display" style={{ color: 'var(--wind)' }}><Counter to={m?.zero_data_improvement_pct} prefix="−" suffix="%" decimals={1} /></div><div className="b-l">error for a state that contributes <b>no data</b> — it still benefits</div></div>
-            <div className="b" data-reveal><div className="b-n display"><Counter to={m ? m.mae_local : null} decimals={1} /></div><div className="b-l">µg/m³ error when each state goes alone (worse than doing nothing: {m?.mae_cams ?? '—'})</div></div>
+            <div className="b" data-reveal><div className="b-n display"><Counter to={m?.nodes} /></div><div className="b-l">states & countries in {m?.federations ? Object.keys(m.federations).length : '…'} regional federations</div></div>
+            <div className="b" data-reveal><div className="b-n display" style={{ color: 'var(--wind)' }}><Counter to={m?.zero_data_improvement_pct} prefix="−" suffix="%" decimals={1} /></div><div className="b-l">error for a place that contributes <b>no data</b> — it borrows its federation</div></div>
+            <div className="b" data-reveal><div className="b-n display"><Counter to={m ? m.mae_personalised : null} decimals={1} /></div><div className="b-l">µg/m³ error, federated + personalised — better than going alone ({m?.mae_local ?? '…'}) or the global model ({m?.mae_cams ?? '…'})</div></div>
             <div className="b b-glyph" data-reveal>
               <div className="hex">⬡</div>
               <div className="b-l">Open Air Event Protocol · CC-BY model weights · designed as a Digital Public Good, ready for BRICS partners from São Paulo to Jakarta.</div>
@@ -286,7 +294,7 @@ export default function Landing() {
 
       <footer className="lfoot">
         <div className="wrap lfoot-in">
-          <div className="lbrand"><Logo size={20} /> Albedo-Watch</div>
+          <div className="lbrand"><Logo size={26} /><Wordmark size={16} /></div>
           <p>Prototype for Build with AI: Code for Communities (2nd ed.). Forecasts and attributions are model estimates, clearly labelled; not official CPCB bulletins. Data: CAMS via Open-Meteo, NASA FIRMS, Google Air Quality & Geocoding. Station counts approximate.</p>
         </div>
       </footer>

@@ -5,6 +5,7 @@ import asyncio
 import base64
 import io
 import logging
+import math
 import time
 from typing import Literal
 
@@ -15,11 +16,10 @@ from pydantic import BaseModel, Field
 from .. import llm
 from ..agents import citizen, command
 from ..config import settings
-from ..engines import attribution, datahub, federated, forecast, hotspots, response
+from ..engines import attribution, datahub, federated, forecast, hotspots, place, response
 from ..engines.naqi import category, grap_stage
-from ..geo import in_bbox
-from ..registry import CITY_BY_ID, COUNTRIES, LANGUAGE_NAMES, STATES, authority_for
-from ..sources import cache
+from ..registry import CITY_BY_ID, COUNTRIES, LANGUAGE_NAMES, STATES, WORLD_COUNTRIES, languages_for_country, languages_of
+from ..sources import cache, gibs, google
 from ..store import store
 
 log = logging.getLogger("albedo.api")
@@ -62,8 +62,10 @@ async def health():
 async def meta():
     return {
         "product": "Albedo-Watch", "model": llm.model_label(), "store": store.backend,
+        "maps_browser_key": settings.google_browser_key or None,
         "states": {k: {"name": s.name, "languages": list(s.languages), "authority": s.authority} for k, s in STATES.items()},
         "languages": LANGUAGE_NAMES, "countries": COUNTRIES, "freshness": _freshness(),
+        "country_languages": {k: list(v.languages) for k, v in WORLD_COUNTRIES.items()},
         "measures": response.MEASURES,
         "sources": [
             {"name": "CAMS global composition forecast (via Open-Meteo)", "use": "PM2.5, PM10, NO₂, SO₂, O₃, CO, dust — hourly, 4-day"},
@@ -80,14 +82,61 @@ async def meta():
 # --------------------------------------------------------------------------- #
 # national pulse & forecasts
 # --------------------------------------------------------------------------- #
+_saved: dict[str, float] = {}
+
+
+def _persist(name: str, data: dict, every: int = 600) -> None:
+    """Throttled snapshot to Firestore so a cold instance can answer instantly."""
+    if time.time() - _saved.get(name, 0) < every:
+        return
+    _saved[name] = time.time()
+    asyncio.get_running_loop().run_in_executor(None, store.put_blob, name, data)
+
+
+def _snapshot(name: str) -> dict | None:
+    key = f"snap:{name}"
+    hit = cache.peek(key)
+    if hit is None:
+        hit = store.get_blob(name)
+        if hit is not None:
+            cache.put(key, hit)
+    return hit
+
+
 @router.get("/pulse")
 async def pulse():
+    if cache.peek("cities_built") is None and (snap := _snapshot("pulse")):
+        asyncio.get_running_loop().create_task(_cities())  # warm in the background
+        return {**snap, "stale": True}
     cities = await _cities()
-    return {
+    out = {
         "generated_at": time.time(), "summary": forecast.pulse_summary(cities),
         "cities": [forecast.public(c) for c in cities], "freshness": _freshness(),
         "model": federated.current().summary if federated.current() else None,
     }
+    _persist("pulse", out)
+    return out
+
+
+@router.get("/overview")
+async def overview():
+    """Tiny, always-fast summary for the landing page (never waits on a rebuild)."""
+    cities = cache.peek("cities_built")
+    p = {"summary": forecast.pulse_summary(cities)} if cities else (_snapshot("pulse") or {})
+    hs = cache.peek("hotspots:world") or _snapshot("hotspots_world") or {}
+    fires = cache.peek("fires") or (await datahub.fires() if settings.offline else None)
+    m = federated.current()
+    commons = m.summary if m else ((_snapshot("commons") or {}).get("summary"))
+    out = {
+        "summary": p.get("summary"), "fires": _fire_summary(fires) if fires else (_snapshot("overview") or {}).get("fires"),
+        "unmonitored_share": hs.get("unmonitored_share"), "sensors": hs.get("sensors"), "stations": hs.get("stations"),
+        "commons": commons,
+    }
+    if all(out.get(k) is not None for k in ("summary", "fires", "commons")):
+        _persist("overview", out, every=300)
+    elif (snap := _snapshot("overview")):
+        out = {k: (v if v is not None else snap.get(k)) for k, v in out.items()}
+    return out
 
 
 @router.get("/city/{cid}")
@@ -102,14 +151,15 @@ async def timeline():
     cities = await _cities()
     frames = []
     for h in range(-24, 73, 3):
-        vals = {}
+        vals, lvls = {}, {}
         for c in cities:
             s = c["_series"]
             k = s["now_offset"] + h
             if 0 <= k < len(s["naqi"]):
                 vals[c["id"]] = s["naqi"][k]
+                lvls[c["id"]] = s["level"][k]
         t = cities[0]["_series"]["time"][cities[0]["_series"]["now_offset"]] + h * 3600 if cities else 0
-        frames.append({"h": h, "t": t, "naqi": vals})
+        frames.append({"h": h, "t": t, "naqi": vals, "level": lvls})
     return {"frames": frames}
 
 
@@ -119,16 +169,70 @@ async def corridors():
 
 
 @router.get("/wind")
-async def wind(h: int = 0):
-    field = await datahub.wind_field()
-    return {"h": h, "step": datahub.GRID_STEP, "vectors": datahub.wind_snapshot(field, time.time() + h * 3600)}
+async def wind(h: int = 0, scope: Literal["global", "india"] = "global"):
+    field = await (datahub.global_wind() if scope == "global" else datahub.wind_field())
+    step = field.lats[1] - field.lats[0]
+    return {"h": h, "step": step, "scope": scope, "vectors": datahub.wind_snapshot(field, time.time() + h * 3600)}
+
+
+def _fire_summary(f: list[dict]) -> dict:
+    frps = sorted(x["frp"] for x in f)
+    return {"count": len(f), "large": sum(1 for v in frps if v >= 20), "median_frp": frps[len(frps) // 2] if frps else None,
+            "definition": "A detection is a ~375 m satellite pixel that was anomalously hot during a NASA VIIRS "
+                          "overpass in the last 24 h — usually a crop or vegetation fire, sometimes a gas flare or "
+                          "industrial heat source. Two satellites' sightings of the same fire are merged (~1 km). "
+                          "Fire radiative power (FRP, megawatts) measures how intense it is: most are small (< 10 MW)."}
 
 
 @router.get("/fires")
-async def fires():
+async def fires(bbox: str | None = None, limit: int = 6000):
+    """World view: 1° aggregates. With bbox=w,s,e,n: individual detections inside it."""
     f = await datahub.fires()
-    return {"count": len(f), "fires": [{"lat": x["lat"], "lon": x["lon"], "frp": x["frp"],
-                                        "age_h": round((time.time() - x["t"]) / 3600, 1)} for x in f[:6000]]}
+    now = time.time()
+    if bbox:
+        try:
+            w, so, e, n = (float(x) for x in bbox.split(","))
+        except ValueError:
+            raise HTTPException(422, "bbox must be w,s,e,n")
+        sel = [x for x in f if so <= x["lat"] <= n and (w <= x["lon"] <= e if w <= e else (x["lon"] >= w or x["lon"] <= e))]
+        sel.sort(key=lambda x: -x["frp"])
+        return {**_fire_summary(sel), "mode": "detections",
+                "fires": [[round(x["lat"], 4), round(x["lon"], 4), round(x["frp"], 1), round((now - x["t"]) / 3600, 1)]
+                          for x in sel[:min(limit, 12000)]]}
+    bins: dict[tuple[int, int], list[float]] = {}
+    for x in f:
+        k = (math.floor(x["lat"]), math.floor(x["lon"]))
+        b = bins.setdefault(k, [0, 0.0, 0.0, 0.0, 0.0])
+        b[0] += 1; b[1] += x["frp"]; b[2] = max(b[2], x["frp"]); b[3] += x["lat"]; b[4] += x["lon"]
+    return {**_fire_summary(f), "mode": "aggregate",
+            "bins": [[round(b[3] / b[0], 2), round(b[4] / b[0], 2), b[0], round(b[1]), round(b[2], 1)] for b in bins.values()]}
+
+
+@router.get("/sensors")
+async def sensors_feed():
+    cit, off = await datahub.citizen_sensors(), await datahub.stations()
+    now = time.time()
+    return {
+        "citizen": [[x["lat"], x["lon"], x["pm25"], round((now - x["t"]) / 60)] for x in cit],
+        "stations": [[x["lat"], x["lon"], x["pm25"], round((now - x["t"]) / 60)] for x in off],
+        "sources": {"citizen": "Sensor.Community open citizen network (low-cost optical PM sensors, uncalibrated)",
+                    "stations": "OpenAQ — official regulatory monitors" if off else "OpenAQ not configured"},
+    }
+
+
+@router.get("/place")
+async def place_intel(lat: float, lon: float):
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise HTTPException(422, "invalid coordinates")
+    return await place.intel(lat, lon)
+
+
+@router.get("/streetview")
+async def streetview(lat: float, lon: float, heading: float | None = None):
+    img = await google.streetview_image(lat, lon, heading)
+    if not img:
+        raise HTTPException(404, "no Street View imagery near this point")
+    return Response(content=img, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 # --------------------------------------------------------------------------- #
@@ -146,8 +250,14 @@ async def attribution_city(cid: str, narrate: bool = True):
 
 
 @router.get("/hotspots")
-async def hotspot_list():
-    return await cache.cached("hotspots", 900, hotspots.find)
+async def hotspot_list(scope: Literal["world", "india"] = "world"):
+    key = f"hotspots:{scope}"
+    if cache.peek(key) is None and (snap := _snapshot(f"hotspots_{scope}")):
+        asyncio.get_running_loop().create_task(cache.cached(key, 900, lambda: hotspots.find(scope)))
+        return {**snap, "stale": True}
+    out = await cache.cached(key, 900, lambda: hotspots.find(scope))
+    _persist(f"hotspots_{scope}", out)
+    return out
 
 
 class SimulateReq(BaseModel):
@@ -193,8 +303,8 @@ async def create_report(
     reporter: str = Form("citizen"),
     photos: list[UploadFile] = File(default=[]), voice: UploadFile | None = File(default=None),
 ):
-    if not in_bbox(lat, lon):
-        raise HTTPException(422, "location outside the supported region")
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise HTTPException(422, "invalid coordinates")
     images = []
     for p in photos[:3]:
         data = await p.read()
@@ -220,7 +330,7 @@ async def create_report(
     }
     doc = store.put("reports", doc)
     cache.put("hotspots_dirty", True)
-    _invalidate("hotspots")
+    _invalidate("hotspots:world"); _invalidate("hotspots:india")
     return doc
 
 
@@ -248,77 +358,156 @@ async def get_report(rid: str):
 # alerts (command centre)
 # --------------------------------------------------------------------------- #
 class DraftReq(BaseModel):
-    kind: Literal["city", "hotspot", "report"]
+    kind: Literal["city", "hotspot", "report", "place"]
     city: str | None = None
     report_id: str | None = None
     lat: float | None = None
     lon: float | None = None
     languages: list[str] | None = Field(default=None, max_length=4)
+    attach_imagery: bool = True
+
+
+SAT_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "visible_smoke": {"type": "BOOLEAN"},
+        "visible_haze": {"type": "BOOLEAN"},
+        "cloud_cover": {"type": "STRING", "enum": ["clear", "partly cloudy", "mostly cloudy", "overcast"]},
+        "observation": {"type": "STRING", "description": "2 factual sentences on what is visible; say if clouds prevent judging"},
+    },
+    "required": ["visible_smoke", "visible_haze", "cloud_cover", "observation"],
+}
+
+
+async def _satellite_evidence(lat: float, lon: float) -> dict:
+    """Today's (or yesterday's) NASA VIIRS true-colour image + thermal detections.
+    The image is always attached; Gemini's reading of it is best-effort."""
+    for shot in gibs.recent(lat, lon):
+        try:
+            img = await asyncio.wait_for(gibs.fetch(shot["url"]), 12)
+        except asyncio.TimeoutError:
+            img = None
+        if not img:
+            continue
+        rec = {"kind": "satellite", "date": shot["date"], "label": shot["label"], "url": shot["url"],
+               "source": "NASA GIBS · VIIRS NOAA-20 true colour + thermal anomalies", "ai": None}
+        if llm.available():
+            prompt = ("This is a NASA VIIRS true-colour satellite image (~70 km across) centred on the location, with "
+                      "red/orange dots marking thermal-anomaly (fire) detections. Describe only what is visible: smoke "
+                      "plumes, regional haze, fire dots, cloud cover. Be conservative; do not speculate.")
+            try:
+                rec["ai"] = await asyncio.wait_for(
+                    asyncio.to_thread(llm.multimodal_json, prompt, [(img, "image/jpeg")], SAT_SCHEMA, None, 30), 32)
+            except asyncio.TimeoutError:
+                pass
+        return rec
+    return {}
+
+
+def _languages(default: list[str], requested: list[str] | None) -> list[str]:
+    langs = [l for l in (requested or default) if l]
+    if not requested and "en" not in langs:
+        langs = ["en"] + langs
+    seen: list[str] = []
+    for l in langs:
+        if l not in seen:
+            seen.append(l)
+    return seen[:4]
 
 
 @router.post("/alerts/draft")
 async def draft(req: DraftReq):
+    evidence_imgs: list[dict] = []
     if req.kind == "city":
         if not req.city:
             raise HTTPException(422, "city required")
         c = await _city(req.city)
         a = await _attribution(req.city)
-        st = c["state"]
+        city = CITY_BY_ID[req.city]
         peak_cat = c["peak_category"]["label"]
         ctx = {
-            "place": c["name"], "state": c["state_name"], "authority": c["authority"]["primary"],
-            "framework": c["authority"]["framework"], "naqi_now": c["naqi"], "category": c["category"]["label"],
-            "naqi_peak": c["peak72"], "peak_category": peak_cat, "spike": c["spike"],
-            "grap": c["spike"]["grap"] if c["spike"] else grap_stage(max(c["naqi"] or 0, c["peak72"] or 0)),
-            "pm25": c["pm25"], "population_m": c["pop_m"], "stagnant_hours_next_48": c["stagnant_hours_48"],
-            "sources": {s["label"]: s["share"] for s in a["sources"]},
-            "upwind_fire_clusters": [f"{x['place']['label']} ({x['fires']} fires, ~{x['transport_h']} h transport)" for x in a["clusters"][:3]],
-            "evidence": [f"NAQI {c['naqi']} now, peak {c['peak72']} forecast", f"Fire influence index {a['fire_influence']}"],
-            "summary": f"{c['name']} NAQI {c['naqi']} ({c['category']['label']}); 72 h peak {c['peak72']} ({peak_cat}).",
+            "place": c["name"], "state": c["state_name"], "country": c["country_name"],
+            "authority": c["authority"]["primary"], "framework": c["authority"]["framework"],
+            "index_system": c["index_system"], "index_now": c["naqi"], "category": c["category"]["label"],
+            "index_peak_72h": c["peak72"], "peak_category": peak_cat, "spike": c["spike"],
+            "response_stage": c["spike"]["grap"] if c["spike"] else c["grap"],
+            "pm25": c["pm25"], "population_m": c["pop_m"], "stagnant_daytime_hours_next_48": c["stagnant_hours_48"],
+            "sources": {x["label"]: x["share"] for x in a["sources"]},
+            "upwind_fire_clusters": [f"{x['place']['label']} ({x['fires']} detections, ~{x['transport_h']} h transport)"
+                                     for x in a["clusters"][:3]],
+            "summary": f"{c['name']} {c['index_system']} {c['naqi']} ({c['category']['label']}); 72 h peak {c['peak72']} ({peak_cat}).",
         }
-        target = {"kind": "city", "id": c["id"], "lat": c["lat"], "lon": c["lon"], "name": c["name"]}
+        lat, lon = c["lat"], c["lon"]
+        default_langs = list(languages_of(city))
+        target = {"kind": "city", "id": c["id"], "lat": lat, "lon": lon, "name": c["name"]}
     elif req.kind == "report":
         r = store.get("reports", req.report_id or "")
         if not r:
             raise HTTPException(404, "report not found")
         an, j = r["analysis"], r["jurisdiction"]
-        st = j["state_code"]
         ctx = {
             "place": j.get("locality") or j.get("district") or j["city"], "state": j["state"],
             "authority": j["route_to"], "category": f"citizen-reported {an['source_label'].lower()}",
             "report": {"summary": an.get("summary_en"), "severity": an["severity"], "evidence": an.get("visual_evidence"),
                        "verification": r["verification"]["status"], "verification_score": r["verification"]["score"]},
-            "nearby_satellite_fires": r["verification"]["nearby_fires"][:3],
+            "nearby_satellite_detections": r["verification"]["nearby_fires"][:3],
             "downwind_cities": r.get("downwind", {}).get("cities", []),
-            "grap": {"stage": 0, "name": "Source-level enforcement"},
-            "summary": an.get("summary_en"),
+            "response_stage": {"stage": 0, "name": "Source-level enforcement"}, "summary": an.get("summary_en"),
         }
-        target = {"kind": "report", "id": r["id"], "lat": r["lat"], "lon": r["lon"], "name": ctx["place"]}
+        lat, lon = r["lat"], r["lon"]
+        cc = j.get("country_code") or ("IN" if j.get("state_code") else "")
+        default_langs = list(languages_for_country(cc or "IN", j.get("state")))
+        target = {"kind": "report", "id": r["id"], "lat": lat, "lon": lon, "name": ctx["place"]}
     else:
         if req.lat is None or req.lon is None:
             raise HTTPException(422, "lat/lon required")
-        hs = (await cache.cached("hotspots", 900, hotspots.find))["hotspots"]
-        h = min(hs, key=lambda x: (x["lat"] - req.lat) ** 2 + (x["lon"] - req.lon) ** 2) if hs else None
-        if not h:
-            raise HTTPException(404, "no hotspot near that point")
-        near = min(CITY_BY_ID.values(), key=lambda c: (c.lat - h["lat"]) ** 2 + (c.lon - h["lon"]) ** 2)
-        st = near.state
+        lat, lon = req.lat, req.lon
+        p = await place.intel(lat, lon)
+        pl = p["place"]
+        name = pl.get("locality") or pl.get("district") or pl.get("nearest_city")
+        g = p.get("google_aq") or {}
+        local = next((i for i in g.get("indexes", []) if i["code"] != "uaqi"), None)
         ctx = {
-            "place": h["admin"].get("district") or h["place"]["label"], "state": STATES[st].name,
-            "authority": f"District Collector, {h['admin'].get('district') or near.name} + {STATES[st].authority}",
-            "category": "unmonitored hotspot", "hotspot": {k: h[k] for k in ("fires", "frp", "reports", "coverage", "why")},
-            "downwind": h["downwind"], "grap": {"stage": 1, "name": "Source-level enforcement"},
-            "summary": h["why"],
+            "place": name, "state": pl.get("state"), "country": pl.get("country"), "address": pl.get("address"),
+            "authority": f"District / municipal administration of {pl.get('district') or name} + {p['authority']}",
+            "category": "hidden hotspot" if req.kind == "hotspot" else "location watch",
+            "live_air_quality_google": ({"index": local["name"], "value": local["aqi"], "category": local["category"]}
+                                        if local else None),
+            "forecast": p["forecast"]["now"], "weather_now": p["weather"],
+            "satellite_heat_detections_within_50km": p["fires"]["within_50km"],
+            "nearest_detections": p["fires"]["nearest"][:4],
+            "citizen_sensors_within_10km": p["citizen_sensors"]["count"],
+            "median_citizen_pm25": p["citizen_sensors"]["median_pm25"],
+            "response_stage": p["forecast"]["now"].get("stage") or {"stage": 0, "name": "Watch"},
+            "summary": f"{name}: {p['fires']['within_50km']} satellite heat detections within 50 km in 24 h.",
         }
-        target = {"kind": "hotspot", "id": f"{h['lat']},{h['lon']}", "lat": h["lat"], "lon": h["lon"], "name": ctx["place"]}
+        default_langs = p["languages"]
+        target = {"kind": req.kind, "id": f"{lat:.4f},{lon:.4f}", "lat": lat, "lon": lon, "name": name}
+        if p["imagery"]["streetview"].get("available"):
+            sv = p["imagery"]["streetview"]
+            evidence_imgs.append({"kind": "streetview", "url": f"/api/streetview?lat={sv['lat']}&lon={sv['lon']}",
+                                  "date": sv.get("date"), "source": "Google Street View (live, not stored)"})
 
-    langs = req.languages or command.languages_for(st)
     t0 = time.perf_counter()
-    draft_json = await asyncio.to_thread(command.draft_alert, ctx, langs)
+    langs = _languages(["en"] + list(default_langs), req.languages)
+    # imagery and drafting run in parallel so the officer is never kept waiting on both
+    sat_task = asyncio.create_task(_satellite_evidence(lat, lon)) if req.attach_imagery else None
+    try:
+        draft_json = await asyncio.wait_for(asyncio.to_thread(command.draft_alert, ctx, langs), 45)
+    except asyncio.TimeoutError:
+        draft_json = command._fallback_alert(ctx, langs)
+    if sat_task:
+        try:
+            sat = await asyncio.wait_for(sat_task, 40)
+        except asyncio.TimeoutError:
+            sat = {}
+        if sat:
+            evidence_imgs.insert(0, sat)
     doc = store.put("alerts", {
-        "target": target, "context": ctx, "draft": draft_json, "languages": langs, "state": st,
+        "target": target, "context": ctx, "draft": draft_json, "languages": langs, "evidence": evidence_imgs,
         "status": "draft", "timeline": [{"status": "draft", "at": time.time(), "by": "Albedo-Watch AI"}],
-        "ai": {"model": draft_json.pop("_model", None) or "template (AI unavailable)", "ms": round((time.perf_counter() - t0) * 1000)},
+        "ai": {"model": draft_json.pop("_model", None) or "template (AI unavailable)",
+               "ms": round((time.perf_counter() - t0) * 1000)},
     })
     return doc
 
@@ -375,8 +564,9 @@ async def ask(req: AskReq):
     summ = forecast.pulse_summary(cities)
     digest: dict = {
         "national": summ,
-        "cities": [{"city": c["name"], "state": c["state_name"], "naqi": c["naqi"], "category": c["category"]["label"],
-                    "pm25": c["pm25"], "peak72": c["peak72"], "spike": bool(c["spike"])} for c in cities],
+        "cities": [{"city": c["name"], "region": c["state_name"], "index": f"{c['index_system']} {c['naqi']}",
+                    "category": c["category"]["label"], "pm25": c["pm25"], "peak72": c["peak72"], "spike": bool(c["spike"])}
+                   for c in sorted(cities, key=lambda c: (-c["category"]["level"], -(c["naqi"] or 0)))[:45]],
     }
     cid = req.city or command.find_city(req.question)
     if cid and cid in CITY_BY_ID:
@@ -389,7 +579,7 @@ async def ask(req: AskReq):
             "spike": c["spike"], "sources": {x["label"]: x["share"] for x in a["sources"]},
             "upwind_fires": [x["place"]["label"] for x in a["clusters"][:3]], "authority": c["authority"],
         }
-    hs = cache.peek("hotspots")
+    hs = cache.peek("hotspots:world")
     if hs:
         digest["hidden_hotspots"] = [{"where": h["place"]["label"], "why": h["why"]} for h in hs["hotspots"][:5]]
     return await asyncio.to_thread(command.ask, req.question, digest)
@@ -400,10 +590,15 @@ async def ask(req: AskReq):
 # --------------------------------------------------------------------------- #
 @router.get("/commons")
 async def commons():
+    if federated.current() is None and (snap := _snapshot("commons")):
+        asyncio.get_running_loop().create_task(federated.ensure_model())
+        return {**snap, "stale": True}
     m = await federated.ensure_model()
     if not m:
         return {"status": "unavailable"}
-    return {"summary": m.summary, "rounds": m.rounds, "nodes": m.nodes, "card": federated.model_card()}
+    out = {"summary": m.summary, "rounds": m.rounds, "nodes": m.nodes, "card": federated.model_card()}
+    _persist("commons", out)
+    return out
 
 
 class TrainReq(BaseModel):

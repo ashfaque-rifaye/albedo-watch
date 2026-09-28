@@ -3,14 +3,13 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  // MapLibre v6 loads its ES-module worker relative to its own file; pre-bundling breaks that URL.
-  optimizeDeps: { exclude: ['maplibre-gl'] },
-  worker: { format: 'iife' },
-  server: { port: Number(process.env.PORT) || 5180, proxy: { '/api': 'http://localhost:8010' } },
+  server: { port: Number(process.env.PORT) || 5180, proxy: { '/api': process.env.API_TARGET || 'http://localhost:8012' } },
+  // CesiumJS loads its workers/assets from /cesium/ (copied by scripts/copy-cesium.mjs)
+  define: { CESIUM_BASE_URL: JSON.stringify('/cesium/') },
   build: {
-    chunkSizeWarningLimit: 1500,
+    chunkSizeWarningLimit: 6000,
     rollupOptions: {
-      output: { manualChunks: (id: string) => (/maplibre-gl|@deck\.gl|@luma\.gl|@loaders\.gl|@math\.gl/.test(id) ? 'map' : undefined) },
+      output: { manualChunks: (id: string) => (/[\\/]node_modules[\\/]cesium[\\/]|[\\/]@cesium[\\/]/.test(id) ? 'cesium' : undefined) },
     },
   },
 })

@@ -37,9 +37,10 @@ ALERT_SCHEMA = {
 }
 
 ALERT_SYSTEM = (
-    "You are the duty officer's drafting assistant at an Indian air-quality command centre. You draft "
-    "precise, lawful, proportionate action orders aligned to CAQM's Graded Response Action Plan (GRAP, 2024) "
-    "and NCAP city action plans, addressed to the named authority. Use only facts given in the context; cite "
+    "You are the duty officer's drafting assistant at an air-quality command centre. You draft "
+    "precise, lawful, proportionate action orders addressed to the named authority: aligned to CAQM's Graded "
+    "Response Action Plan (GRAP, 2024) and NCAP city plans for places in India, and to the local authority's "
+    "episode plan with WHO Air Quality Guidelines as reference elsewhere. Use only facts given in the context; cite "
     "numbers. Public advisories must be plain, calm and actionable for ordinary people, especially children, "
     "elderly, outdoor workers and people with asthma/heart disease. Write each advisory natively in its "
     "language and script (not transliterated). Output JSON only."
@@ -47,14 +48,14 @@ ALERT_SYSTEM = (
 
 
 def _fallback_alert(ctx: dict, langs: list[str]) -> dict:
-    g = ctx.get("grap") or grap_stage(ctx.get("naqi_peak"))
+    g = ctx.get("response_stage") or ctx.get("grap") or grap_stage(ctx.get("naqi_peak"))
     return {
-        "title": f"{ctx['place']}: air quality {ctx.get('category', 'deteriorating')} — {g['name']}",
-        "severity": "emergency" if g["stage"] >= 3 else "warning" if g["stage"] >= 1 else "advisory",
+        "title": f"{ctx['place']}: air quality {ctx.get('category', 'deteriorating')} — {g.get('name', 'Watch')}",
+        "severity": "emergency" if g.get("stage", 0) >= 3 else "warning" if g.get("stage", 0) >= 1 else "advisory",
         "situation": ctx.get("summary", ""),
         "evidence": ctx.get("evidence", []),
         "actions": [{"action": m["label"], "owner": m["owner"], "within_hours": m["lead_h"], "why": "GRAP schedule"}
-                    for m in MEASURES if 0 < m["grap"] <= max(1, g["stage"])][:5],
+                    for m in MEASURES if 0 < m["grap"] <= max(1, g.get("stage", 1))][:5],
         "advisories": [{"lang": "en", "text": "Limit outdoor exertion, keep children and elderly indoors during peak hours, use N95 masks outdoors."}],
         "sms": "Air quality is poor. Avoid outdoor exertion; use N95 masks. -Albedo-Watch",
         "review_note": "AI drafting unavailable — template used.",
@@ -67,13 +68,16 @@ def draft_alert(ctx: dict, langs: list[str]) -> dict:
     prompt = (
         "CONTEXT (JSON):\n" + json.dumps(ctx, ensure_ascii=False, default=str)[:6000] + "\n\n"
         f"Draft an action order to: {ctx['authority']}.\n"
+        "If the place is outside India, do NOT cite GRAP or Indian agencies; use the local authority and a graded "
+        "episode response with WHO Air Quality Guidelines as reference. If a satellite_observation is given, cite it "
+        "as evidence. Write the English advisory first.\n"
         f"Write public advisories in exactly these languages: {lang_list}.\n"
         "Actions: 4–7 concrete measures matched to the attributed sources and the GRAP stage, each with owner and "
         "a deadline in hours. SMS: primary local language, ≤160 characters.\n"
         "Return JSON with keys: title, severity, situation, evidence, actions[{action,owner,within_hours,why}], "
         "advisories[{lang,text}], sms, review_note."
     )
-    out = llm.generate_json(prompt, ALERT_SCHEMA, ALERT_SYSTEM)
+    out = llm.generate_json(prompt, ALERT_SCHEMA, ALERT_SYSTEM, budget_s=40)
     if not out or not out.get("actions"):
         return _fallback_alert(ctx, langs)
     out["_model"] = llm.served_label()

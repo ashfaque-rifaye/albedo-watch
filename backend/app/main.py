@@ -34,7 +34,8 @@ async def _warm():
         await api._cities()
         from .engines import hotspots
         from .sources import cache
-        await cache.cached("hotspots", 900, hotspots.find)
+        await cache.cached("hotspots:world", 900, lambda: hotspots.find("world"))
+        await cache.cached("hotspots:india", 900, lambda: hotspots.find("india"))
     except Exception as exc:
         log.warning("warm-up incomplete (%s)", exc)
 

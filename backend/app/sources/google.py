@@ -71,3 +71,64 @@ async def reverse_geocode(lat: float, lon: float) -> dict:
         if res.get("formatted_address"):
             info.setdefault("address", res["formatted_address"])
     return info
+
+
+AQ_CURRENT = "https://airquality.googleapis.com/v1/currentConditions:lookup"
+SV_META = "https://maps.googleapis.com/maps/api/streetview/metadata"
+SV_IMAGE = "https://maps.googleapis.com/maps/api/streetview"
+
+
+async def aq_current(lat: float, lon: float) -> dict:
+    """Live station-fused conditions incl. the country's official local index."""
+    key = settings.maps_server_key
+    if not key or settings.offline:
+        return {}
+    body = {"location": {"latitude": lat, "longitude": lon},
+            "extraComputations": ["LOCAL_AQI", "POLLUTANT_CONCENTRATION", "HEALTH_RECOMMENDATIONS",
+                                  "DOMINANT_POLLUTANT_CONCENTRATION"], "languageCode": "en"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(AQ_CURRENT, params={"key": key}, json=body)
+        if r.status_code != 200:
+            return {}
+        d = r.json()
+    except Exception:
+        return {}
+    idx = [{"code": i.get("code"), "name": i.get("displayName"), "aqi": i.get("aqi"), "category": i.get("category"),
+            "dominant": i.get("dominantPollutant"), "color": _rgb(i.get("color"))} for i in d.get("indexes", [])]
+    pol = {p["code"]: {"name": p.get("displayName"), "value": p.get("concentration", {}).get("value"),
+                       "units": p.get("concentration", {}).get("units")} for p in d.get("pollutants", [])}
+    return {"time": d.get("dateTime"), "region": d.get("regionCode"), "indexes": idx, "pollutants": pol,
+            "health": d.get("healthRecommendations", {}).get("generalPopulation")}
+
+
+def _rgb(c: dict | None) -> str | None:
+    if not c:
+        return None
+    return "#{:02x}{:02x}{:02x}".format(int(255 * c.get("red", 0)), int(255 * c.get("green", 0)), int(255 * c.get("blue", 0)))
+
+
+async def streetview_meta(lat: float, lon: float, radius: int = 1000) -> dict:
+    key = settings.maps_server_key
+    if not key or settings.offline:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(SV_META, params={"location": f"{lat},{lon}", "radius": radius, "source": "outdoor", "key": key})
+        d = r.json()
+        return d if d.get("status") == "OK" else {}
+    except Exception:
+        return {}
+
+
+async def streetview_image(lat: float, lon: float, heading: float | None = None, fov: int = 90) -> bytes | None:
+    """Live Street View frame. Never cached or stored (Google Maps Platform terms)."""
+    key = settings.maps_server_key
+    if not key:
+        return None
+    params = {"size": "640x400", "location": f"{lat},{lon}", "fov": fov, "radius": 1000, "source": "outdoor", "key": key}
+    if heading is not None:
+        params["heading"] = heading
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(SV_IMAGE, params=params)
+    return r.content if r.status_code == 200 and r.headers.get("content-type", "").startswith("image") else None

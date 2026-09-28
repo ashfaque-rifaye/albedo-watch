@@ -132,16 +132,32 @@ def generate(prompt: str, system: str | None = None, *, fast: bool = False) -> s
     return None
 
 
-def generate_json(prompt: str, schema: Any, system: str | None = None, *, fast: bool = False) -> Any | None:
+def generate_json(prompt: str, schema: Any, system: str | None = None, *, fast: bool = False,
+                  budget_s: float | None = None) -> Any | None:
+    """budget_s: stop trying further providers once this much time has passed; with a
+    budget the fast model is tried right after the primary (overload fallback)."""
+    import time as _time
     key = _key("json", fast, system, prompt, schema)
     if (hit := _get(key)) is not None:
         return _parse_json(hit)
     chain = ([GEMINI_FAST] if fast else []) + PROVIDERS
+    if budget_s is not None:
+        # Under a deadline: primary, then the most reliable Gemini, then the fast internal fallbacks.
+        steady = [p for p in GEMINI_BACKUPS if getattr(p, "model", "").startswith("gemini-2.5")] or GEMINI_BACKUPS[-1:]
+        others = [p for p in PROVIDERS if not isinstance(p, GeminiProvider)]
+        chain = [GEMINI, *steady, *others]
+    t0 = _time.perf_counter()
     for provider in chain:
+        left = None if budget_s is None else budget_s - (_time.perf_counter() - t0)
+        if left is not None and left < 3:
+            break
         if not provider.available():
             continue
         try:
-            text = provider.complete(prompt, system, json_schema=schema)
+            if isinstance(provider, GeminiProvider) and left is not None:
+                text = provider.complete(prompt, system, json_schema=schema, timeout_ms=int(min(16, left) * 1000))
+            else:
+                text = provider.complete(prompt, system, json_schema=schema)
         except Exception:
             text = None
         parsed = _parse_json(text) if text else None
@@ -152,10 +168,17 @@ def generate_json(prompt: str, schema: Any, system: str | None = None, *, fast: 
     return None
 
 
-def multimodal_json(prompt: str, media: list[tuple[bytes, str]], schema: Any, system: str | None = None) -> Any | None:
+def multimodal_json(prompt: str, media: list[tuple[bytes, str]], schema: Any, system: str | None = None,
+                    budget_s: float = 45) -> Any | None:
     """Photo / voice understanding. Gemini only — no cache (inputs are unique)."""
-    for provider in (GEMINI, *GEMINI_BACKUPS, GEMINI_FAST):
-        text = provider.complete(prompt, system, json_schema=schema, media=media)
+    import time as _time
+    t0 = _time.perf_counter()
+    steady = [p for p in GEMINI_BACKUPS if getattr(p, "model", "").startswith("gemini-2.5")]
+    for provider in (GEMINI, *steady, GEMINI_FAST):
+        left = budget_s - (_time.perf_counter() - t0)
+        if left < 4:
+            break
+        text = provider.complete(prompt, system, json_schema=schema, media=media, timeout_ms=int(min(20, left) * 1000))
         parsed = _parse_json(text) if text else None
         if parsed is not None:
             _tls.model = _label(provider)

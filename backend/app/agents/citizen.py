@@ -14,7 +14,7 @@ import time
 from .. import llm
 from ..engines import attribution, datahub
 from ..geo import haversine_km
-from ..registry import CITIES, STATES, authority_for
+from ..registry import CITIES, STATES, authority_for, is_india, languages_for_country, region_name
 from ..sources import google
 from ..store import store
 
@@ -94,7 +94,7 @@ async def analyze(*, lat: float, lon: float, text: str, lang: str | None,
 
     context = (
         f"Location: {lat:.4f}, {lon:.4f} ({geo.get('address') or f'near {city.name}'}).\n"
-        f"Nearest tracked city: {city.name}, {STATES[city.state].name} "
+        f"Nearest tracked city: {city.name}, {region_name(city)} "
         f"({round(haversine_km(lat, lon, city.lat, city.lon))} km).\n"
         f"Modelled PM2.5 there now: {pm_here if pm_here is not None else 'unknown'} µg/m³.\n"
         f"NASA FIRMS satellite fires within ~30 km in the last 48 h: "
@@ -143,9 +143,12 @@ async def analyze(*, lat: float, lon: float, text: str, lang: str | None,
               else "verified" if score >= 0.62 else "probable" if score >= 0.4 else "unverified")
 
     auth_info = authority_for(city)
-    route = ROUTING.get(a.get("source_type", "other"), "{spcb}").format(
-        spcb=STATES[city.state].authority_short, municipal=auth_info["municipal"])
-    field = await datahub.wind_field()
+    board = STATES[city.state].authority_short if is_india(city) and not (geo.get("country") not in (None, "IN")) \
+        else auth_info["primary_short"]
+    route = ROUTING.get(a.get("source_type", "other"), "{spcb}").format(spcb=board, municipal=auth_info["municipal"])
+    if not is_india(city):
+        route = route.replace("District Collector (Agriculture)", "District agriculture authority")
+    field = await datahub.wind_cheap(lat, lon)
     dw = attribution.downwind(field, lat, lon, hours=12) if a.get("is_pollution_event") else {"paths": [], "cities": [], "pop_at_risk_m": 0}
 
     return {
@@ -156,7 +159,8 @@ async def analyze(*, lat: float, lon: float, text: str, lang: str | None,
                         "authentic": bool(auth), "context_consistent": ctx == 1.0},
             "nearby_fires": near_fires,
         },
-        "jurisdiction": {"city": city.name, "state": STATES[city.state].name, "state_code": city.state,
+        "jurisdiction": {"city": city.name, "state": geo.get("state") or region_name(city),
+                         "state_code": city.state if is_india(city) else "", "country_code": geo.get("country") or city.country,
                          "district": geo.get("district"), "locality": geo.get("locality"),
                          "address": geo.get("address"), "route_to": route},
         "downwind": {"paths": dw["paths"], "cities": dw["cities"][:5], "pop_at_risk_m": dw["pop_at_risk_m"]},

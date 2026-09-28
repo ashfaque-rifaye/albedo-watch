@@ -72,7 +72,7 @@ class GeminiProvider(LLMProvider):
             self._safety = None
         return self._safety
 
-    def _config(self, types, system: str | None, response_schema: Any):
+    def _config(self, types, system: str | None, response_schema: Any, timeout_ms: int | None = None):
         kwargs: dict[str, Any] = {
             "temperature": settings.gemini_temperature,
             "max_output_tokens": settings.gemini_max_output_tokens,
@@ -83,10 +83,12 @@ class GeminiProvider(LLMProvider):
         if response_schema is not None:
             kwargs["response_mime_type"] = "application/json"
             kwargs["response_schema"] = response_schema
+        if timeout_ms:
+            kwargs["http_options"] = types.HttpOptions(timeout=timeout_ms)
         return types.GenerateContentConfig(**{k: v for k, v in kwargs.items() if v is not None})
 
     def complete(self, prompt: str, system: str | None = None, *, json_schema: Any = None,
-                 media: list[tuple[bytes, str]] | None = None) -> str | None:
+                 media: list[tuple[bytes, str]] | None = None, timeout_ms: int | None = None) -> str | None:
         client = self._get_client()
         if client is None:
             return None
@@ -100,7 +102,7 @@ class GeminiProvider(LLMProvider):
             resp = client.models.generate_content(
                 model=self.model,
                 contents=contents,
-                config=self._config(types, system, json_schema),
+                config=self._config(types, system, json_schema, timeout_ms),
             )
             return (resp.text or "").strip() or None
         except Exception as exc:

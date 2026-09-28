@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from ..config import settings
 from ..geo import wind_uv
 from ..registry import CITIES, CITY_BY_ID
-from ..sources import cache, firms, google, openmeteo
+from ..sources import cache, firms, google, openmeteo, sensors
 
 log = logging.getLogger("albedo.hub")
 
@@ -55,11 +55,11 @@ async def city_series() -> dict[str, dict]:
 
 
 # --------------------------------------------------------------------------- #
-# Wind field
+# Wind fields: a fine grid over India (flagship) + on-demand regional grids anywhere
 # --------------------------------------------------------------------------- #
 GRID_STEP = 2.5
-GRID_LATS = [5.0 + GRID_STEP * i for i in range(14)]    # 5 … 37.5
-GRID_LONS = [65.0 + GRID_STEP * j for j in range(14)]   # 65 … 97.5
+GRID_LATS = [5.0 + GRID_STEP * i for i in range(14)]    # India: 5 … 37.5
+GRID_LONS = [65.0 + GRID_STEP * j for j in range(14)]   # India: 65 … 97.5
 
 
 @dataclass
@@ -67,10 +67,22 @@ class WindField:
     times: list[int]
     u: list[list[list[float]]]   # [t][i][j] km/h
     v: list[list[list[float]]]
+    lats: list[float] = None     # type: ignore[assignment]
+    lons: list[float] = None     # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.lats is None:
+            self.lats, self.lons = GRID_LATS, GRID_LONS
+
+    def covers(self, lat: float, lon: float, margin: float = 0.0) -> bool:
+        return (self.lats[0] + margin <= lat <= self.lats[-1] - margin
+                and self.lons[0] + margin <= lon <= self.lons[-1] - margin)
 
     def at(self, lat: float, lon: float, t: float) -> tuple[float, float]:
-        fi = min(max((lat - GRID_LATS[0]) / GRID_STEP, 0), len(GRID_LATS) - 1.001)
-        fj = min(max((lon - GRID_LONS[0]) / GRID_STEP, 0), len(GRID_LONS) - 1.001)
+        step_i = self.lats[1] - self.lats[0]
+        step_j = self.lons[1] - self.lons[0]
+        fi = min(max((lat - self.lats[0]) / step_i, 0), len(self.lats) - 1.001)
+        fj = min(max((lon - self.lons[0]) / step_j, 0), len(self.lons) - 1.001)
         i, j = int(fi), int(fj)
         di, dj = fi - i, fj - j
         k = bisect.bisect_right(self.times, t) - 1
@@ -87,34 +99,69 @@ class WindField:
         return u, v
 
 
-async def _fetch_wind() -> WindField:
-    pts = [(la, lo) for la in GRID_LATS for lo in GRID_LONS]
-    rows = await openmeteo.grid_wind(pts)
+async def _fetch_grid(lats: list[float], lons: list[float], past_days: int = 2, forecast_days: int = 3) -> WindField:
+    pts = [(la, lo) for la in lats for lo in lons]
+    rows = await openmeteo.grid_wind(pts, past_days=past_days, forecast_days=forecast_days)
     times = rows[0].get("time") or []
-    nI, nJ = len(GRID_LATS), len(GRID_LONS)
+    nI, nJ = len(lats), len(lons)
     u = [[[0.0] * nJ for _ in range(nI)] for _ in times]
     v = [[[0.0] * nJ for _ in range(nI)] for _ in times]
     for idx, row in enumerate(rows):
         i, j = divmod(idx, nJ)
         ws, wd = row.get("wind_speed_10m") or [], row.get("wind_direction_10m") or []
         for k in range(len(times)):
-            s = ws[k] if k < len(ws) and ws[k] is not None else 0.0
+            sp = ws[k] if k < len(ws) and ws[k] is not None else 0.0
             d = wd[k] if k < len(wd) and wd[k] is not None else 0.0
-            u[k][i][j], v[k][i][j] = wind_uv(s, d)
-    return WindField(times, u, v)
+            u[k][i][j], v[k][i][j] = wind_uv(sp, d)
+    return WindField(times, u, v, list(lats), list(lons))
+
+
+async def _fetch_wind() -> WindField:
+    return await _fetch_grid(GRID_LATS, GRID_LONS)
 
 
 async def wind_field() -> WindField:
+    """India's fine wind field (flagship)."""
     return await cached_or_offline("wind", settings.wind_ttl, _fetch_wind)
 
 
+GLOBAL_STEP = 10.0
+GLOBAL_LATS = [-70.0 + GLOBAL_STEP * i for i in range(15)]     # −70 … 70
+GLOBAL_LONS = [-180.0 + GLOBAL_STEP * j for j in range(37)]    # −180 … 180
+
+
+async def global_wind() -> WindField:
+    """Coarse planetary wind for the globe's flow layer (10°, refreshed 6-hourly)."""
+    return await cached_or_offline("wind_global", 6 * 3600,
+                                   lambda: _fetch_grid(GLOBAL_LATS, GLOBAL_LONS, past_days=0, forecast_days=2))
+
+
+async def wind_for(lat: float, lon: float) -> WindField:
+    """Wind field for trajectories anywhere: India's fine grid, else a 2° regional grid
+    (±14°) around the point, cached per 10° tile."""
+    india = await wind_field()
+    if india.covers(lat, lon, margin=4.0):
+        return india
+    clat, clon = round(lat / 10) * 10, round(lon / 10) * 10
+    lats = [clat - 12 + 2 * i for i in range(13) if -80 <= clat - 12 + 2 * i <= 80]
+    lons = [clon - 12 + 2 * j for j in range(13)]
+    return await cached_or_offline(f"wind:{clat}:{clon}", settings.wind_ttl, lambda: _fetch_grid(lats, lons))
+
+
+async def wind_cheap(lat: float, lon: float) -> WindField:
+    """No new upstream calls: India's fine grid if it covers the point, else the planetary grid."""
+    india = await wind_field()
+    if india.covers(lat, lon, margin=1.0):
+        return india
+    return await global_wind()
+
+
 def wind_snapshot(field: WindField, t: float, stride: int = 1) -> list[dict]:
-    """Vectors for the map's animated flow layer at time t."""
     out = []
-    for i in range(0, len(GRID_LATS), stride):
-        for j in range(0, len(GRID_LONS), stride):
-            u, v = field.at(GRID_LATS[i], GRID_LONS[j], t)
-            out.append({"lat": GRID_LATS[i], "lon": GRID_LONS[j], "u": round(u, 2), "v": round(v, 2)})
+    for i in range(0, len(field.lats), stride):
+        for j in range(0, len(field.lons), stride):
+            u, v = field.at(field.lats[i], field.lons[j], t)
+            out.append({"lat": field.lats[i], "lon": field.lons[j], "u": round(u, 2), "v": round(v, 2)})
     return out
 
 
@@ -147,7 +194,20 @@ async def _fetch_truth() -> dict[str, dict[int, float]]:
 
 
 async def truth() -> dict[str, dict[int, float]]:
-    return await cached_or_offline("truth", settings.truth_ttl, _fetch_truth)
+    return await cached_or_offline("truth", max(settings.truth_ttl, 12 * 3600), _fetch_truth)
+
+
+# --------------------------------------------------------------------------- #
+# Ground sensors: Sensor.Community citizen network (keyless) + OpenAQ (keyed)
+# --------------------------------------------------------------------------- #
+async def citizen_sensors() -> list[dict]:
+    return await cached_or_offline("sensors", 15 * 60, sensors.fetch_sensor_community)
+
+
+async def stations() -> list[dict]:
+    if not settings.openaq_api_key:
+        return []
+    return await cached_or_offline("openaq", 60 * 60, sensors.fetch_openaq)
 
 
 # --------------------------------------------------------------------------- #
@@ -187,6 +247,10 @@ def _synthetic(key: str):
         now = hrs[72]
         return [{"lat": 30.2 + 0.05 * k, "lon": 75.0 + 0.07 * k, "frp": 12.0 + k, "t": now - 3600 * (k % 20),
                  "conf": "n", "sensor": "synthetic", "day": True, "n": 1} for k in range(40)]
+    if key in ("sensors", "openaq"):
+        return []
+    if key == "wind_global" or key.startswith("wind:"):
+        return _synthetic("wind")
     if key == "truth":
         cs = _synthetic("city_series")
         return {c.id: {t: v * 0.6 for t, v in zip(cs[c.id]["time"][:72], cs[c.id]["pm25"][:72])} for c in TRUTH_CITIES}
@@ -203,7 +267,8 @@ def city(cid: str):
 
 async def warm() -> None:
     """Background warm-up so the first page view is instant."""
-    for name, fn in (("city_series", city_series), ("wind", wind_field), ("fires", fires), ("truth", truth)):
+    for name, fn in (("city_series", city_series), ("wind", wind_field), ("fires", fires), ("truth", truth),
+                     ("wind_global", global_wind), ("sensors", citizen_sensors), ("openaq", stations)):
         try:
             await fn()
             log.info("warmed %s", name)

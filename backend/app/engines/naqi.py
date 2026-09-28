@@ -93,3 +93,67 @@ def rolling_mean(values: list[float | None], window: int) -> list[float | None]:
         win = [v for v in values[max(0, i - window + 1): i + 1] if v is not None]
         out.append(sum(win) / len(win) if win else None)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# US EPA AQI (2024 PM2.5 revision) — used outside India
+# --------------------------------------------------------------------------- #
+_EPA_IDX = [(0, 50), (51, 100), (101, 150), (151, 200), (201, 300), (301, 500)]
+_EPA_BP = {
+    "pm25": [(0.0, 9.0), (9.1, 35.4), (35.5, 55.4), (55.5, 125.4), (125.5, 225.4), (225.5, 325.4)],
+    "pm10": [(0, 54), (55, 154), (155, 254), (255, 354), (355, 424), (425, 604)],
+}
+EPA_LABELS = ["Good", "Moderate", "Unhealthy for Sensitive Groups", "Unhealthy", "Very Unhealthy", "Hazardous"]
+EPA_HEALTH = {
+    "Good": "Air quality is satisfactory.",
+    "Moderate": "Unusually sensitive people should consider reducing prolonged outdoor exertion.",
+    "Unhealthy for Sensitive Groups": "Children, older adults and people with heart or lung disease should reduce prolonged exertion.",
+    "Unhealthy": "Everyone may begin to experience health effects; sensitive groups more seriously.",
+    "Very Unhealthy": "Health alert: everyone may experience more serious health effects.",
+    "Hazardous": "Health warning of emergency conditions for the entire population.",
+}
+LEVEL_COLORS = [c for _, _, c in CATEGORIES]
+
+
+def epa_aqi(conc: dict[str, float | None]) -> tuple[int | None, str | None]:
+    best, dom = None, None
+    for p, bps in _EPA_BP.items():
+        v = conc.get(p)
+        if v is None or v != v or v < 0:
+            continue
+        v = round(v, 1) if p == "pm25" else round(v)
+        idx = 500.0
+        for (lo, hi), (ilo, ihi) in zip(bps, _EPA_IDX):
+            if v <= hi:
+                idx = ilo + (ihi - ilo) * (v - lo) / max(hi - lo, 1e-9)
+                break
+        if best is None or idx > best:
+            best, dom = idx, p
+    return (int(round(max(0, min(500, best)))), dom) if best is not None else (None, None)
+
+
+def index_for(system: str, conc: dict[str, float | None]) -> tuple[int | None, str | None]:
+    return naqi(conc) if system == "naqi" else epa_aqi({"pm25": conc.get("pm25"), "pm10": conc.get("pm10")})
+
+
+def category_for(system: str, index: float | None) -> dict:
+    if system == "naqi":
+        return category(index) | {"system": "NAQI"}
+    if index is None:
+        return {"label": "No data", "color": "#6b7280", "level": -1, "system": "US AQI"}
+    ceilings = [50, 100, 150, 200, 300, 10_000]
+    level = next(i for i, c in enumerate(ceilings) if index <= c)
+    label = EPA_LABELS[level]
+    return {"label": label, "color": LEVEL_COLORS[level], "level": level, "health": EPA_HEALTH[label], "system": "US AQI"}
+
+
+def stage_for(system: str, index: float | None) -> dict:
+    """Graded response stage: CAQM GRAP in India; a generic 3-tier episode plan elsewhere."""
+    if system == "naqi":
+        return grap_stage(index) | {"framework": "GRAP"}
+    lvl = category_for(system, index)["level"]
+    if lvl <= 2:
+        return {"stage": 0, "name": "No episode", "trigger": "US AQI ≤ 150", "framework": "Episode plan"}
+    names = {3: "Alert — Unhealthy", 4: "Warning — Very Unhealthy", 5: "Emergency — Hazardous"}
+    triggers = {3: "US AQI 151–200", 4: "US AQI 201–300", 5: "US AQI > 300"}
+    return {"stage": lvl - 2, "name": names[lvl], "trigger": triggers[lvl], "framework": "Episode plan"}

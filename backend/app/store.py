@@ -75,4 +75,40 @@ class Store:
         return docs[:limit]
 
 
+    # ---- compressed snapshots (instant cold starts) ------------------------ #
+    def put_blob(self, name: str, data: dict) -> None:
+        import gzip
+        import json
+        raw = gzip.compress(json.dumps(data, separators=(",", ":"), default=str).encode("utf-8"))
+        with self._lock:
+            self._mem.setdefault("snapshots", {})[name] = {"id": name, "data": raw}
+        if self._fs is not None and len(raw) < 900_000:
+            try:
+                self._fs.collection("snapshots").document(name).set({"data": raw, "at": time.time()})
+            except Exception as exc:
+                log.warning("snapshot write failed (%s)", type(exc).__name__)
+
+    def get_blob(self, name: str) -> dict | None:
+        import gzip
+        import json
+        raw = None
+        with self._lock:
+            hit = self._mem.get("snapshots", {}).get(name)
+            if hit:
+                raw = hit["data"]
+        if raw is None and self._fs is not None:
+            try:
+                snap = self._fs.collection("snapshots").document(name).get()
+                if snap.exists:
+                    raw = snap.to_dict().get("data")
+            except Exception:
+                return None
+        if not raw:
+            return None
+        try:
+            return json.loads(gzip.decompress(raw))
+        except Exception:
+            return None
+
+
 store = Store()

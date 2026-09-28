@@ -35,6 +35,8 @@ class City:
     profile: str                        # source-profile family for apportionment priors
     truth: bool = False
     local_name: str = ""
+    country: str = "IN"
+    index: str = "naqi"          # naqi (CPCB, India) | epa (US EPA AQI, rest of world)
 
 
 STATES: dict[str, State] = {s.code: s for s in [
@@ -179,7 +181,7 @@ LANGUAGE_NAMES = {
     "ml": "Malayalam", "kok": "Konkani", "as": "Assamese", "kha": "Khasi", "mni": "Manipuri", "ks": "Kashmiri",
 }
 
-# The same registry shape extends across borders (competition rule: BRICS applicability).
+# Coverage summary (competition rule: BRICS applicability) — India is the deep flagship.
 COUNTRIES = {
     "IN": {"name": "India", "status": "live", "cities": len(CITIES)},
     "BR": {"name": "Brazil", "status": "registry-ready", "note": "Amazon fire smoke → São Paulo; same FIRMS + CAMS pipeline"},
@@ -189,17 +191,99 @@ COUNTRIES = {
 }
 
 
-def state_of(city: City) -> State:
-    return STATES[city.state]
+INDIA_CITIES: list[City] = list(CITIES)
+
+# ---- the rest of the world ------------------------------------------------ #
+from .world import COUNTRIES as WORLD_COUNTRIES, EXTRA_PROFILES, REGION_PROFILE, WORLD_CITY_ROWS  # noqa: E402
+
+PROFILES.update(EXTRA_PROFILES)
+for _id, _name, _cc, _lat, _lon, _pop, _truth in WORLD_CITY_ROWS:
+    _country = WORLD_COUNTRIES[_cc]
+    CITIES.append(City(_id, _name, "", _lat, _lon, _pop, 0, REGION_PROFILE.get(_country.region, "western_metro"),
+                       _truth, "", _cc, "epa"))
+CITY_BY_ID = {c.id: c for c in CITIES}
+
+LANGUAGE_NAMES.update({
+    "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "mn": "Mongolian", "th": "Thai", "vi": "Vietnamese",
+    "id": "Indonesian", "ms": "Malay", "tl": "Filipino", "my": "Burmese", "km": "Khmer", "lo": "Lao", "ne": "Nepali",
+    "si": "Sinhala", "ps": "Pashto", "fa": "Persian", "ar": "Arabic", "ku": "Kurdish", "uz": "Uzbek", "kk": "Kazakh",
+    "ky": "Kyrgyz", "ru": "Russian", "tr": "Turkish", "he": "Hebrew", "fr": "French", "de": "German", "es": "Spanish",
+    "ca": "Catalan", "it": "Italian", "nl": "Dutch", "pl": "Polish", "cs": "Czech", "hu": "Hungarian", "ro": "Romanian",
+    "bg": "Bulgarian", "sr": "Serbian", "bs": "Bosnian", "hr": "Croatian", "mk": "Macedonian", "sq": "Albanian",
+    "el": "Greek", "pt": "Portuguese", "ga": "Irish", "sv": "Swedish", "no": "Norwegian", "da": "Danish", "fi": "Finnish",
+    "uk": "Ukrainian", "be": "Belarusian", "ha": "Hausa", "yo": "Yoruba", "ln": "Lingala", "zu": "Zulu", "af": "Afrikaans",
+    "sw": "Swahili", "am": "Amharic", "rw": "Kinyarwanda", "ak": "Akan", "wo": "Wolof", "bm": "Bambara", "sn": "Shona",
+    "mg": "Malagasy", "qu": "Quechua", "ay": "Aymara", "gn": "Guarani", "mi": "Māori", "tpi": "Tok Pisin",
+})
+
+
+def is_india(city: City) -> bool:
+    return city.country == "IN"
+
+
+def node_of(city: City) -> str:
+    """Federated-learning node: an Indian state, or a country."""
+    return f"IN-{city.state}" if is_india(city) else city.country
+
+
+def node_name(node: str) -> str:
+    if node.startswith("IN-"):
+        return STATES[node[3:]].name
+    return WORLD_COUNTRIES[node].name if node in WORLD_COUNTRIES else node
+
+
+def node_authority(node: str) -> str:
+    if node.startswith("IN-"):
+        return STATES[node[3:]].authority_short
+    c = WORLD_COUNTRIES.get(node)
+    return c.authority.split(" (")[0].split(" / ")[0] if c else node
+
+
+def region_name(city: City) -> str:
+    return STATES[city.state].name if is_india(city) else WORLD_COUNTRIES[city.country].name
+
+
+def country_name(city: City) -> str:
+    return WORLD_COUNTRIES[city.country].name
+
+
+def languages_of(city: City) -> tuple[str, ...]:
+    return STATES[city.state].languages if is_india(city) else WORLD_COUNTRIES[city.country].languages
+
+
+def languages_for_country(cc: str, admin: str | None = None) -> tuple[str, ...]:
+    """Advisory languages for any point on Earth: India resolves to the state, else the country."""
+    if cc == "IN" and admin:
+        for st in STATES.values():
+            if st.name.lower() == admin.lower() or admin.lower().startswith(st.name.lower()):
+                return st.languages
+    c = WORLD_COUNTRIES.get(cc)
+    return c.languages if c else ("en",)
 
 
 def authority_for(city: City) -> dict:
-    st = STATES[city.state]
-    ncr = city.id in NCR
+    if is_india(city):
+        st = STATES[city.state]
+        ncr = city.id in NCR
+        return {
+            "primary": "Commission for Air Quality Management in NCR" if ncr else st.authority,
+            "primary_short": "CAQM" if ncr else st.authority_short,
+            "state_board": st.authority,
+            "municipal": f"{city.name} Municipal Corporation",
+            "framework": "GRAP (CAQM, 2024 revision)" if ncr else "NCAP City Clean Air Action Plan · GRAP-style graded response",
+        }
+    c = WORLD_COUNTRIES[city.country]
     return {
-        "primary": "Commission for Air Quality Management in NCR" if ncr else st.authority,
-        "primary_short": "CAQM" if ncr else st.authority_short,
-        "state_board": st.authority,
-        "municipal": f"{city.name} Municipal Corporation",
-        "framework": "GRAP (CAQM, 2024 revision)" if ncr else "NCAP City Clean Air Action Plan · GRAP-style graded response",
+        "primary": c.authority, "primary_short": c.authority.split(" (")[0].split(" / ")[0][:40],
+        "state_board": c.authority, "municipal": f"{city.name} city administration",
+        "framework": "Local air-quality episode plan · WHO Air Quality Guidelines (2021) as reference",
     }
+
+
+def authority_for_country(cc: str, admin: str | None = None) -> str:
+    if cc == "IN" and admin:
+        for st in STATES.values():
+            if st.name.lower() == admin.lower():
+                return st.authority
+    c = WORLD_COUNTRIES.get(cc)
+    return c.authority if c else "Local environmental authority"

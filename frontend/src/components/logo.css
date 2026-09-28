@@ -1,0 +1,20 @@
+.aw-logo { overflow: visible; filter: drop-shadow(0 0 10px rgba(241, 230, 200, .18)); }
+.aw-logo .aw-lids { transform-origin: 32px 32px; }
+.aw-logo.on .aw-lids { animation: aw-blink 7.5s ease-in-out infinite; }
+.aw-logo.on .aw-orbit { transform-origin: 32px 32px; animation: aw-spin 18s linear infinite; }
+.aw-logo .aw-night { transform: translateX(-9px); }
+.aw-logo.on .aw-night { animation: aw-phase 9s ease-in-out infinite alternate; }
+.aw-logo.on .aw-glint { animation: aw-glint 3.2s ease-in-out infinite; }
+.aw-logo.on .aw-city { animation: aw-flicker 2.4s ease-in-out infinite; }
+.aw-logo.on .aw-city.d2 { animation-delay: .9s; }
+@keyframes aw-blink { 0%, 93%, 100% { transform: scaleY(1); } 95.5% { transform: scaleY(.08); } }
+@keyframes aw-spin { to { transform: rotate(360deg); } }
+@keyframes aw-phase { from { transform: translateX(-14px); } to { transform: translateX(-5px); } }
+@keyframes aw-glint { 0%, 100% { opacity: .95; transform: scale(1); } 50% { opacity: .35; transform: scale(.6); } }
+@keyframes aw-flicker { 50% { opacity: .25; } }
+
+.aw-word { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.03em; display: inline-flex; align-items: baseline; }
+.aw-w1 { background: linear-gradient(180deg, #fff 20%, #e8dbb6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.aw-dash { color: var(--wind); margin: 0 .04em; opacity: .9; }
+.aw-w2 { background: linear-gradient(180deg, #e9f6ff 10%, #8fdcf2); -webkit-background-clip: text; background-clip: text; color: transparent; }
+@media (prefers-reduced-motion: reduce) { .aw-logo * { animation: none !important; } }
