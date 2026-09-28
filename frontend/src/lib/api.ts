@@ -1,0 +1,138 @@
+// Typed client for the Albedo-Watch API.
+const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
+
+export type Cat = { label: string; color: string; level: number; health?: string }
+export type Grap = { stage: number; name: string; trigger: string }
+export type Spike = { peak: number; peak_time: number; category: string; lead_hours: number; onset_time: number; grap: Grap }
+export type City = {
+  id: string; name: string; local_name: string; state: string; state_name: string; lat: number; lon: number
+  pop_m: number; stations: number; naqi: number | null; category: Cat; dominant: string | null
+  pm25: number | null; pm25_cams: number | null; correction: string; peak72: number | null; peak72_time: number
+  peak_category: Cat; spike: Spike | null; trend24: number | null; grap: Grap; ventilation_now: number | null
+  stagnant_hours_48: number; wind: { speed: number; dir: number }
+  authority: { primary: string; primary_short: string; state_board: string; municipal: string; framework: string }
+  series?: Series
+}
+export type Series = {
+  time: number[]; naqi: (number | null)[]; pm25: (number | null)[]; pm25_cams: (number | null)[]; pm10: (number | null)[]
+  no2: (number | null)[]; so2: (number | null)[]; o3: (number | null)[]; dust: (number | null)[]; blh: (number | null)[]
+  ws: (number | null)[]; wd: (number | null)[]; now_offset: number
+}
+export type Pulse = {
+  generated_at: number
+  summary: { cities: number; states: number; pop_covered_m: number; pop_poor_now_m: number; spikes_72h: number; pop_spike_m: number
+    worst: { id: string; name: string; naqi: number; category: string }[]; stagnant_cities: number; national_median: number | null }
+  cities: City[]
+  freshness: Record<string, number | null>
+  model: CommonsSummary | null
+}
+export type Place = { city: string; state: string; km: number; dir: string; label: string }
+export type Cluster = { lat: number; lon: number; fires: number; frp: number; weight: number; share: number; transport_h: number; place: Place }
+export type Attribution = {
+  city: string; name: string; paths: [number, number, number][][]; fire_influence: number; clusters: Cluster[]
+  fires_considered: number; sources: { key: string; label: string; share: number; ugm3: number }[]; pm25: number | null
+  method: string; narrative?: { headline: string; explanation: string; drivers: string[]; what_would_help?: string; confidence: string }
+  city_row: City
+}
+export type Hotspot = {
+  lat: number; lon: number; evidence: number; coverage: number; score: number; priority: number; fires: number; frp: number
+  reports: number; signals: Record<string, number>; place: Place; admin: Record<string, string>; why: string
+  downwind: { cities: { id: string; name: string; pop_m: number; eta_h: number }[]; pop_at_risk_m: number }
+}
+export type Hotspots = { hotspots: Hotspot[]; cells_scanned: number; fires: number; reports: number; unmonitored_share: number; method: string }
+export type Fire = { lat: number; lon: number; frp: number; age_h: number }
+export type WindVec = { lat: number; lon: number; u: number; v: number }
+export type Corridor = {
+  id: string; name: string; kind: string; blurb: string; path: [number, number][]; peak72: number; peak_category: Cat
+  worst_city: string; worst_time: number; pop_m: number; spikes: number
+  strip: { id: string; name: string; lat: number; lon: number; cells: { h: number; naqi: number | null; color: string }[] }[]
+}
+export type Report = {
+  id: string; created_at: number; lat: number; lon: number; text: string; lang: string; thumb: string | null; has_voice: boolean
+  analysis: { is_pollution_event: boolean; source_type: string; source_label: string; severity: number; confidence: number
+    visual_evidence?: string[]; summary_en: string; language_detected: string; transcript?: string; translation_en?: string
+    looks_authentic: boolean; authenticity_notes?: string; health_risk?: string; reply_to_citizen: string; tags?: string[] }
+  verification: { score: number; status: string; signals: { ai_confidence: number; satellite: number; peer_reports: number; authentic: boolean; context_consistent: boolean }
+    nearby_fires: { km: number; frp: number; hours_ago: number }[] }
+  jurisdiction: { city: string; state: string; state_code: string; district?: string; locality?: string; address?: string; route_to: string }
+  downwind: { paths?: [number, number, number][][]; cities: { id: string; name: string; pop_m: number; eta_h: number }[]; pop_at_risk_m?: number }
+  ai: { model: string; ms: number; modalities: string[] }
+}
+export type Alert = {
+  id: string; created_at: number; status: string; state: string; languages: string[]
+  target: { kind: string; id: string; lat: number; lon: number; name: string }
+  draft: { title: string; severity: string; situation: string; evidence?: string[]
+    actions: { action: string; owner: string; within_hours: number; why?: string }[]
+    advisories: { lang: string; text: string }[]; sms: string; review_note?: string; fallback?: boolean }
+  timeline: { status: string; at: number; by: string; note?: string; channels?: string[] }[]
+  ai: { model: string; ms: number }
+}
+export type CommonsSummary = {
+  nodes: number; samples: number; rounds: number; mae_cams: number; mae_local: number; mae_federated: number
+  mae_personalised: number; mae_zero_data: number; raw_bytes_kept_local: number; bytes_shared: number
+  train_ms: number; dp_sigma: number; improvement_pct: number; zero_data_improvement_pct: number
+}
+export type CommonsNode = {
+  state: string; name: string; authority: string; cities: string[]; samples: number; lat: number; lon: number
+  mae_cams: number; mae_local: number; mae_federated: number; mae_personalised: number; mae_zero_data: number
+  bias_cams: number; mean_truth: number
+}
+export type Commons = { summary: CommonsSummary; rounds: { round: number; mae: number }[]; nodes: CommonsNode[]; card: Record<string, unknown> }
+export type SimResult = {
+  pm25_before: number; pm25_after: number; reduction: number; reduction_pct: number; naqi_before: number; naqi_after: number
+  category_before: Cat; category_after: Cat; measures: { id: string; label: string; owner: string; lead_h: number; ugm3: number; exposure_only: boolean }[]
+  compliance: number; people_benefiting_m: number; risk_reduction_pct: number; caveat: string
+}
+export type Measure = { id: string; label: string; grap: number; owner: string; lead_h: number; cost: string; cuts: Record<string, number> }
+export type Meta = {
+  product: string; model: string; store: string; languages: Record<string, string>
+  states: Record<string, { name: string; languages: string[]; authority: string }>
+  countries: Record<string, { name: string; status: string; note?: string; cities?: number }>
+  freshness: Record<string, number | null>; measures: Measure[]; sources: { name: string; use: string }[]
+}
+
+async function req<T>(path: string, init?: RequestInit, timeoutMs = 60000): Promise<T> {
+  const ctl = new AbortController()
+  const t = setTimeout(() => ctl.abort(), timeoutMs)
+  try {
+    const r = await fetch(BASE + path, { ...init, signal: ctl.signal })
+    if (!r.ok) {
+      let msg = `${r.status}`
+      try { msg = (await r.json()).detail ?? msg } catch { /* not json */ }
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    }
+    return (await r.json()) as T
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+const post = <T,>(path: string, body: unknown, timeoutMs?: number) =>
+  req<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, timeoutMs)
+
+export const api = {
+  meta: () => req<Meta>('/api/meta'),
+  pulse: () => req<Pulse>('/api/pulse', undefined, 120000),
+  city: (id: string) => req<City>(`/api/city/${id}`),
+  timeline: () => req<{ frames: { h: number; t: number; naqi: Record<string, number | null> }[] }>('/api/timeline'),
+  corridors: () => req<{ corridors: Corridor[] }>('/api/corridors'),
+  wind: (h = 0) => req<{ vectors: WindVec[]; step: number }>(`/api/wind?h=${h}`),
+  fires: () => req<{ count: number; fires: Fire[] }>('/api/fires'),
+  attribution: (id: string) => req<Attribution>(`/api/attribution/${id}`, undefined, 90000),
+  hotspots: () => req<Hotspots>('/api/hotspots', undefined, 90000),
+  simulate: (city: string, measures: string[], compliance: number) => post<SimResult>('/api/simulate', { city, measures, compliance }),
+  reports: () => req<{ reports: Report[] }>('/api/reports'),
+  createReport: (fd: FormData) => req<Report>('/api/reports', { method: 'POST', body: fd }, 120000),
+  alerts: () => req<{ alerts: Alert[] }>('/api/alerts'),
+  draftAlert: (body: { kind: 'city' | 'hotspot' | 'report'; city?: string; report_id?: string; lat?: number; lon?: number }) =>
+    post<Alert>('/api/alerts/draft', body, 120000),
+  alertStatus: (id: string, status: string, note = '') => post<Alert>(`/api/alerts/${id}/status`, { status, note, by: 'Duty Officer' }),
+  ask: (question: string, city?: string) => post<{ answer: string; model: string | null }>('/api/ask', { question, city }, 90000),
+  commons: () => req<Commons>('/api/commons', undefined, 90000),
+  train: (rounds: number, dp_sigma: number) => post<Commons>('/api/commons/train', { rounds, dp_sigma }, 120000),
+  tts: async (text: string): Promise<string> => {
+    const r = await fetch(BASE + '/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+    if (!r.ok) throw new Error('voice unavailable')
+    return URL.createObjectURL(await r.blob())
+  },
+}
