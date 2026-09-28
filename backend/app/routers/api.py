@@ -9,7 +9,7 @@ import math
 import time
 from typing import Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -206,6 +206,52 @@ async def fires(bbox: str | None = None, limit: int = 6000):
         b[0] += 1; b[1] += x["frp"]; b[2] = max(b[2], x["frp"]); b[3] += x["lat"]; b[4] += x["lon"]
     return {**_fire_summary(f), "mode": "aggregate",
             "bins": [[round(b[3] / b[0], 2), round(b[4] / b[0], 2), b[0], round(b[1]), round(b[2], 1)] for b in bins.values()]}
+
+
+@router.get("/events")
+async def events(country: str | None = None, limit: int = Query(30, ge=1, le=80)):
+    """Live event feed (never blocks on a rebuild: reads what is already cached)."""
+    now = time.time()
+    out: list[dict] = []
+    cities = cache.peek("cities_built") or []
+    for c in cities:
+        sp = c.get("spike")
+        if sp:
+            out.append({"id": f"spike:{c['id']}", "kind": "spike", "t": now - 60, "severity": sp["peak_category"]["level"],
+                        "title": f"{c['name']}: {sp['peak_category']['label']} air in ~{sp['lead_hours']} h",
+                        "sub": f"{c['index_system']} peak {sp['peak']} · {sp['grap']['name']}",
+                        "lat": c["lat"], "lon": c["lon"], "city": c["id"], "country": c["country"]})
+    for scope in ("india", "world"):
+        for h in ((cache.peek(f"hotspots:{scope}") or _snapshot(f"hotspots_{scope}") or {}).get("hotspots") or [])[:8]:
+            where = (h.get("admin") or {}).get("district") or h["place"]["label"]
+            out.append({"id": f"hs:{h['lat']}:{h['lon']}", "kind": "fire", "t": h.get("newest") or now - 3600,
+                        "severity": 3 if h["frp_max"] >= 100 else 2,
+                        "title": f"{h['fires']} satellite heat detections · {where}",
+                        "sub": f"strongest {h['frp_max']:.0f} MW · " + (f"nearest monitor {h['nearest_monitor_km']} km" if h.get("nearest_monitor_km") is not None else "no monitor nearby"),
+                        "lat": h["lat"], "lon": h["lon"], "country": (h.get("admin") or {}).get("country")})
+    for r in store.list("reports", 15):
+        an, j = r.get("analysis", {}), r.get("jurisdiction", {})
+        out.append({"id": f"rep:{r['id']}", "kind": "report", "t": r.get("created_at", now), "severity": an.get("severity", 2) - 1,
+                    "title": f"Citizen report {r.get('verification', {}).get('status', '')}: {an.get('source_label', 'report')}",
+                    "sub": ", ".join(x for x in (j.get("locality"), j.get("state")) if x) or j.get("city", ""),
+                    "lat": r["lat"], "lon": r["lon"], "report": r["id"], "country": j.get("country_code")})
+    for a in store.list("alerts", 15):
+        tl = a.get("timeline") or [{}]
+        out.append({"id": f"al:{a['id']}:{a.get('status')}", "kind": "alert", "t": tl[-1].get("at", a.get("created_at", now)),
+                    "severity": 2, "title": f"Order {a.get('status')}: {a.get('draft', {}).get('title', '')}"[:120],
+                    "sub": ", ".join(a.get("languages", [])), "lat": a["target"]["lat"], "lon": a["target"]["lon"], "alert": a["id"]})
+    fires = cache.peek("fires")
+    if fires:
+        out.append({"id": "feed:firms", "kind": "feed", "t": now - (cache.age_s("fires") or 0), "severity": 0,
+                    "title": f"NASA FIRMS: {len(fires):,} heat detections worldwide in 24 h", "sub": "VIIRS S-NPP + NOAA-20"})
+    sens = cache.peek("sensors")
+    if sens:
+        out.append({"id": "feed:sensors", "kind": "feed", "t": now - (cache.age_s("sensors") or 0), "severity": 0,
+                    "title": f"{len(sens):,} citizen air sensors reporting", "sub": "Sensor.Community, last 5 min"})
+    if country:
+        out = [e for e in out if e.get("country") in (None, country)]
+    out.sort(key=lambda e: (-(e["severity"] >= 3), -e["t"]))
+    return {"events": out[:limit], "generated_at": now}
 
 
 @router.get("/sensors")

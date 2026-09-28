@@ -129,3 +129,10 @@ def test_security_headers_allow_camera_and_mic(client):
     h = client.get("/api/health").headers
     assert h["x-content-type-options"] == "nosniff"
     assert "microphone=(self)" in h["permissions-policy"] and "camera=(self)" in h["permissions-policy"]
+
+
+def test_event_feed(client):
+    client.get("/api/pulse")
+    e = client.get("/api/events").json()["events"]
+    assert e and all({"id", "kind", "title", "t"} <= set(x) for x in e)
+    assert client.get("/api/events", params={"limit": 500}).status_code == 422

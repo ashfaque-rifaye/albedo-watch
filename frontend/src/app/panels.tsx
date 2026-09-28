@@ -97,6 +97,60 @@ function inRegion(c: City, r: string) {
 }
 
 /* ================================================================ PULSE */
+function HubCard({ ctx }: { ctx: Ctx }) {
+  const h = ctx.hub
+  if (!h) {
+    return (
+      <div className="card hub-cta">
+        <div className="display" style={{ fontSize: 22, lineHeight: 1.15 }}>What are you breathing right now?</div>
+        <p className="muted" style={{ margin: 0, fontSize: 13.5 }}>Use your location to set your hub: live measured air at your locality, a 24-hour forecast, and alerts for your area.</p>
+        <div className="btn-row">
+          <button className="btn btn-primary btn-sm" disabled={ctx.locating} onClick={ctx.locateMe}>{ctx.locating ? 'Locating…' : '⌖ Use my location'}</button>
+          <select className="select" value={ctx.country ?? ''} onChange={(e) => ctx.setCountry(e.target.value || null)} aria-label="Choose country">
+            <option value="">…or choose a country</option>
+            {ctx.countries.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+          </select>
+        </div>
+      </div>
+    )
+  }
+  const i = h.intel
+  if (!i) return <div className="card hub"><Loading lines={3} label="Reading the air at your hub…" /></div>
+  const g = i.google_aq, local = g.indexes?.find((x) => x.code !== 'uaqi'), uaqi = g.indexes?.find((x) => x.code === 'uaqi')
+  const f = i.forecast
+  const strip = f.series ? f.series.level.slice(f.series.now_offset, f.series.now_offset + 25).filter((_, k) => k % 3 === 0) : []
+  const name = i.place.locality || i.place.district || i.place.nearest_city
+  return (
+    <div className="card hub">
+      <div className="sec-h"><div><div className="eyebrow" style={{ color: 'var(--wind)' }}>⌖ Your hub</div><h3 style={{ fontSize: 18 }}>{name}</h3>
+        <div className="muted" style={{ fontSize: 12 }}>{[i.place.state, i.place.country].filter(Boolean).join(', ')}</div></div>
+        <button className="linkish" onClick={ctx.clearHub}>change</button></div>
+      <div className="live-row">
+        {local ? <div className="big-idx" style={{ ['--c' as string]: local.color ?? '#9ccc3a' }}><b className="display">{local.aqi}</b><span>{local.name} · measured now</span><em>{local.category}</em></div>
+          : f.now.index != null ? <div className="big-idx" style={{ ['--c' as string]: f.now.category?.color ?? '#9ccc3a' }}><b className="display">{f.now.index}</b><span>{f.now.system} · forecast model</span><em>{f.now.category?.label}</em></div> : null}
+        {uaqi && <div className="big-idx small" style={{ ['--c' as string]: uaqi.color ?? '#9ccc3a' }}><b className="display">{uaqi.aqi}</b><span>Universal AQI</span><em>{uaqi.category}</em></div>}
+      </div>
+      {strip.length > 0 && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 4 }}>Next 24 h · every 3 h</div>
+          <div className="hub-strip">{strip.map((l, k) => <i key={k} style={{ background: LEVEL_COLORS[Math.max(0, l)] }} title={`+${k * 3} h`} />)}</div>
+          <div className="hub-strip-lab mono"><span>now</span><span>+12 h</span><span>+24 h</span></div>
+        </div>
+      )}
+      {g.health && <p className="fine" style={{ color: 'var(--ink-2)', margin: 0 }}>{g.health}</p>}
+      <div className="kv-grid">
+        <div><span>Heat detections ≤ 50 km</span><b className="mono">{i.fires.within_50km}</b></div>
+        <div><span>Wind</span><b className="mono">{fmt(i.weather.wind_kmh, 0)} km/h from {i.weather.wind_from_compass ?? '—'}</b></div>
+      </div>
+      <div className="btn-row">
+        <button className="btn btn-primary btn-sm" onClick={() => ctx.openPlace(h.lat, h.lon, 2500)}>◳ Live 3D view</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => { ctx.setDraftFor({ kind: 'place', lat: h.lat, lon: h.lon, label: name, suggested: i.languages }); ctx.setMode('command') }}>▲ Alert my area</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => { ctx.setPick({ lat: h.lat, lon: h.lon }); ctx.setMode('citizen') }}>✦ Report</button>
+      </div>
+    </div>
+  )
+}
+
 export function PulsePanel({ ctx }: { ctx: Ctx }) {
   const p = ctx.pulse
   const [region, setRegion] = useState('World')
@@ -104,26 +158,20 @@ export function PulsePanel({ ctx }: { ctx: Ctx }) {
   if (!p) return <Loading lines={6} label="Pulling forecasts, winds, satellites and sensors for 233 cities…" />
   if (city) return <CityCard ctx={ctx} city={city} />
   const s = p.summary
-  const inR = p.cities.filter((c) => inRegion(c, region))
+  const scopeName = ctx.country ? (ctx.countries.find((c) => c.code === ctx.country)?.name ?? ctx.country) : region
+  const inR = p.cities.filter((c) => (ctx.country ? c.country === ctx.country : inRegion(c, region)))
   const spikes = inR.filter((c) => c.spike).sort((a, b) => b.spike!.peak_category.level - a.spike!.peak_category.level || b.spike!.peak - a.spike!.peak)
   const worst = inR.filter((c) => c.naqi != null).sort((a, b) => b.category.level - a.category.level || b.naqi! - a.naqi!)
   return (
     <div className="stack">
-      <div className="stats-2">
-        <Stat value={`${fmt(s.pop_covered_m, 0)}M`} label={`people in ${s.cities} cities across ${s.countries} countries, forecast hourly`} />
-        <Stat value={`${s.spikes_72h}`} label="cities heading into unhealthy air in the next 72 h" tone="#f08a24" />
-        <Stat value={fmt(ctx.fireInfo?.count)} label="satellite heat detections, last 24 h (NASA)" tone="#ff8a3d" />
-        <Stat value={`${s.national_median ?? '—'}`} label={`India median NAQI now · ${s.india_cities} cities, ${s.states} states`} tone={LEVEL_COLORS[Math.max(0, Math.min(5, Math.floor((s.national_median ?? 0) / 100)))]} />
-      </div>
-      {p.model && (
-        <div className="callout">
-          <span className="eyebrow" style={{ color: 'var(--albedo)' }}>⬡ Model Commons active</span>
-          <div>Forecasts here are corrected by regional federations of {p.model.nodes} states &amp; countries that <b>never share raw data</b> — error down <b>{p.model.improvement_pct}%</b> vs the global model.</div>
-        </div>
+      <HubCard ctx={ctx} />
+      {ctx.country ? (
+        <div className="chips-row"><span className="chip on">{scopeName} · {inR.length} cities</span><button className="chip chip-btn" onClick={() => ctx.setCountry(null)}>× show whole world</button></div>
+      ) : (
+        <div className="chips-row">{REGIONS.map((r) => <button key={r} className={`chip chip-btn ${r === region ? 'on' : ''}`} onClick={() => setRegion(r)}>{r}</button>)}</div>
       )}
-      <div className="chips-row">{REGIONS.map((r) => <button key={r} className={`chip chip-btn ${r === region ? 'on' : ''}`} onClick={() => setRegion(r)}>{r}</button>)}</div>
       <section>
-        <div className="sec-h"><h3>Spike warnings · {region}</h3><span className="muted">{spikes.length}</span></div>
+        <div className="sec-h"><h3>Unhealthy air ahead · {scopeName}</h3><span className="muted">{spikes.length}</span></div>
         <div className="list">
           {spikes.slice(0, 10).map((c) => (
             <button key={c.id} className="row" onClick={() => ctx.selectCity(c.id)}>
@@ -139,7 +187,7 @@ export function PulsePanel({ ctx }: { ctx: Ctx }) {
         </div>
       </section>
       <section>
-        <div className="sec-h"><h3>Worst air right now · {region}</h3></div>
+        <div className="sec-h"><h3>Worst air right now · {scopeName}</h3></div>
         <div className="list">
           {worst.slice(0, 8).map((c) => (
             <button key={c.id} className="row" onClick={() => ctx.selectCity(c.id)}>
@@ -151,7 +199,7 @@ export function PulsePanel({ ctx }: { ctx: Ctx }) {
           ))}
         </div>
       </section>
-      <p className="fine">India: CPCB NAQI (PM2.5/PM10/NO₂/SO₂). Elsewhere: US EPA AQI (PM). Both on bias-corrected CAMS forecasts — model estimates, not official bulletins. Click anywhere on the globe for live, local readings.</p>
+      <p className="fine">{s.cities} cities · {s.countries} countries · India: CPCB NAQI (median {s.national_median ?? '—'} now). Elsewhere US EPA AQI. Forecasts are bias-corrected model estimates. Click anywhere on the globe for live, measured readings.</p>
     </div>
   )
 }
@@ -382,6 +430,7 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
           const on = !ctx.layers.photoreal; ctx.setLayers({ ...ctx.layers, photoreal: on })
           if (on) ctx.flyTo(d.lon, d.lat, 1100, -32, 20)
         }}>◳ {ctx.layers.photoreal ? '3D city on' : '3D city view'}</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => ctx.track(d.lon, d.lat, name)}>⌖ Track</button>
         <button className="btn btn-ghost btn-sm" onClick={() => ctx.flyTo(d.lon, d.lat, 60000, -60)}>Zoom out</button>
         <button className="btn btn-ghost btn-sm" onClick={() => { ctx.setPick({ lat: d.lat, lon: d.lon }); ctx.setMode('citizen') }}>✦ Report here</button>
       </div>

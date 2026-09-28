@@ -1,10 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Alert, Attribution, City, Commons, Corridor, FireFeed, Hotspot, Hotspots, Meta, Pulse, Report, Sensors, WindVec } from '../lib/api'
+import type { Alert, Attribution, City, Commons, Corridor, FireFeed, Hotspot, Hotspots, LiveEvent, Meta, PlaceIntel, Pulse, Report, Sensors, WindVec } from '../lib/api'
 import { api } from '../lib/api'
 import { fmt, istTime } from '../lib/format'
 import { Logo, Wordmark } from '../components/Logo'
-import type { FlyTarget, GlobeLayers, Theme } from './Globe'
-import { LEVEL_COLORS } from './Globe'
+import type { FlyTarget, GlobeLayers, Sensor, Telemetry, Theme, Track } from './Globe'
+import { EventFeed, Hud, Legend, TourCaption } from './hud'
 import { AskDrawer, CitizenPanel, CommandPanel, CommonsPanel, DetectPanel, ForecastPanel, PlacePanel, PulsePanel, TracePanel } from './panels'
 import './app.css'
 
@@ -12,7 +12,7 @@ const Globe = lazy(() => import('./Globe'))
 
 export type Mode = 'pulse' | 'detect' | 'trace' | 'citizen' | 'forecast' | 'command' | 'commons' | 'place'
 const MODES: { id: Exclude<Mode, 'place'>; label: string; verb: string; icon: string }[] = [
-  { id: 'pulse', label: 'Pulse', verb: 'The planet’s air, live', icon: '◉' },
+  { id: 'pulse', label: 'Pulse', verb: 'Air near you & worldwide', icon: '◉' },
   { id: 'detect', label: 'Detect', verb: 'Hidden hotspots', icon: '◎' },
   { id: 'trace', label: 'Trace', verb: 'Source attribution', icon: '↶' },
   { id: 'citizen', label: 'Citizen', verb: 'Report in any language', icon: '✦' },
@@ -21,6 +21,7 @@ const MODES: { id: Exclude<Mode, 'place'>; label: string; verb: string; icon: st
   { id: 'commons', label: 'Commons', verb: 'Federated models', icon: '⬡' },
 ]
 export type DraftFor = { kind: 'city' | 'hotspot' | 'report' | 'place'; city?: string; report_id?: string; lat?: number; lon?: number; label?: string; suggested?: string[] }
+export type Hub = { lat: number; lon: number; intel: PlaceIntel | null }
 
 export type Ctx = {
   meta: Meta | null
@@ -58,13 +59,24 @@ export type Ctx = {
   openPlace: (lat: number, lon: number, range?: number) => void
   layers: GlobeLayers
   setLayers: (l: GlobeLayers) => void
+  country: string | null
+  setCountry: (c: string | null) => void
+  countries: { code: string; name: string; region: string; n: number }[]
+  hub: Hub | null
+  locating: boolean
+  locateMe: () => void
+  clearHub: () => void
+  track: (lon: number, lat: number, label: string) => void
 }
 
-const RANGE = { world: 1.8e7, region: 3.2e6, city: 9e4, street: 2800 }
+const RANGE = { world: 1.8e7, city: 9e4, street: 2800 }
+const isMobile = () => window.matchMedia('(max-width: 820px)').matches
+function loadHub(): { lat: number; lon: number } | null { try { const s = localStorage.getItem('aw-hub'); return s ? JSON.parse(s) : null } catch { return null } }
 
 export default function MissionControl() {
   const q = new URLSearchParams(location.search)
   const initial = (q.get('mode') as Mode) || 'pulse'
+  const mobile = useMemo(isMobile, [])
   const [mode, setModeRaw] = useState<Mode>([...MODES.map((m) => m.id), 'place'].includes(initial as never) ? initial : 'pulse')
   const [meta, setMeta] = useState<Meta | null>(null)
   const [pulse, setPulse] = useState<Pulse | null>(null)
@@ -78,9 +90,11 @@ export default function MissionControl() {
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [corridors, setCorridors] = useState<Corridor[]>([])
   const [commons, setCommons] = useState<Commons | null>(null)
+  const [events, setEvents] = useState<LiveEvent[]>([])
   const [frames, setFrames] = useState<{ h: number; t: number; naqi: Record<string, number | null>; level: Record<string, number> }[]>([])
   const [frameIdx, setFrameIdx] = useState<number | null>(null)
   const [playing, setPlaying] = useState(false)
+  const [replay, setReplay] = useState(false)
   const [selectedCity, setSelectedCity] = useState<string | null>(null)
   const [selectedReport, setSelectedReport] = useState<string | null>(null)
   const [attribution, setAttribution] = useState<Attribution | null>(null)
@@ -93,21 +107,33 @@ export default function MissionControl() {
   })
   const [fly, setFly] = useState<FlyTarget | null>(null)
   const [theme, setTheme] = useState<Theme>('satellite')
+  const [sensor, setSensor] = useState<Sensor>('eo')
+  const [hud, setHud] = useState(!mobile)
+  const [trackT, setTrackT] = useState<Track>(null)
+  const [tel, setTel] = useState<Telemetry | null>(null)
   const [layers, setLayers] = useState<GlobeLayers>({ wind: true, fires: true, cities: true, hotspots: true, reports: true, sensors: true,
     corridors: false, aq: false, photoreal: false, sunlight: true })
   const [layersOpen, setLayersOpen] = useState(false)
+  const [legendOpen, setLegendOpen] = useState(false)
   const [fireHelp, setFireHelp] = useState(false)
   const [askOpen, setAskOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [draftFor, setDraftFor] = useState<DraftFor | null>(null)
+  const [country, setCountryRaw] = useState<string | null>(() => { try { return localStorage.getItem('aw-country') } catch { return null } })
+  const [hub, setHub] = useState<Hub | null>(() => { const h = loadHub(); return h ? { ...h, intel: null } : null })
+  const [locating, setLocating] = useState(false)
+  const [sheet, setSheet] = useState<'peek' | 'half' | 'full' | 'open' | 'min'>(mobile ? 'peek' : 'open')
+  const [tour, setTour] = useState<{ step: number; steps: { title: string; text: string; go: () => void }[] } | null>(null)
   const viewReq = useRef(0)
+  const tourTimer = useRef<number | null>(null)
 
   const setMode = useCallback((m: Mode) => {
     setModeRaw(m)
+    if (mobile) setSheet((s) => (s === 'peek' ? 'half' : s))
     const u = new URL(location.href); u.searchParams.set('mode', m)
     if (m !== 'place') { u.searchParams.delete('lat'); u.searchParams.delete('lon') }
     history.replaceState(null, '', u)
-  }, [])
+  }, [mobile])
 
   const reloadPulse = useCallback(async () => {
     try {
@@ -117,6 +143,7 @@ export default function MissionControl() {
   }, [])
   const refreshReports = useCallback(async () => { try { setReports((await api.reports()).reports) } catch { /* keep last */ } }, [])
   const refreshAlerts = useCallback(async () => { try { setAlerts((await api.alerts()).alerts) } catch { /* keep last */ } }, [])
+  const refreshEvents = useCallback(async () => { try { setEvents((await api.events()).events) } catch { /* keep last */ } }, [])
 
   useEffect(() => {
     reloadPulse()
@@ -127,10 +154,10 @@ export default function MissionControl() {
     api.timeline().then((t) => setFrames(t.frames)).catch(() => {})
     api.corridors().then((c) => setCorridors(c.corridors)).catch(() => {})
     api.commons().then((c) => ('summary' in c ? setCommons(c) : null)).catch(() => {})
-    refreshReports(); refreshAlerts()
-    const iv = setInterval(() => { reloadPulse(); refreshReports(); api.sensors().then(setSensors).catch(() => {}) }, 5 * 60 * 1000)
+    refreshReports(); refreshAlerts(); refreshEvents()
+    const iv = setInterval(() => { reloadPulse(); refreshReports(); refreshEvents(); api.sensors().then(setSensors).catch(() => {}) }, 3 * 60 * 1000)
     return () => clearInterval(iv)
-  }, [reloadPulse, refreshReports, refreshAlerts])
+  }, [reloadPulse, refreshReports, refreshAlerts, refreshEvents])
 
   useEffect(() => {
     setHotspots(null)
@@ -139,6 +166,9 @@ export default function MissionControl() {
       if (h.stale) setTimeout(() => api.hotspots(hotScope).then((x) => !x.stale && setHotspots(x)).catch(() => {}), 20000)
     }).catch(() => {})
   }, [hotScope])
+
+  // saved hub: refresh its live readings
+  useEffect(() => { if (hub && !hub.intel) api.place(hub.lat, hub.lon).then((i) => setHub({ lat: hub.lat, lon: hub.lon, intel: i })).catch(() => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (mode === 'forecast') setLayers((l) => ({ ...l, corridors: true })) }, [mode])
   useEffect(() => {
@@ -149,61 +179,137 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (!playing || !frames.length) return
-    const iv = setInterval(() => setFrameIdx((i) => { const n = (i ?? frames.findIndex((f) => f.h === 0)) + 1; return n >= frames.length ? 0 : n }), 650)
+    const iv = setInterval(() => setFrameIdx((i) => { const n = (i ?? frames.findIndex((f) => f.h === 0)) + 1; return n >= frames.length ? 0 : n }), 700)
     return () => clearInterval(iv)
   }, [playing, frames])
 
-  // open the deep-linked place once on load
   useEffect(() => { if (place && mode === 'place') setFly({ lon: place.lon, lat: place.lat, range: RANGE.street, pitch: -40, key: Date.now() }) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const cities = pulse?.cities ?? []
+  const countries = useMemo(() => {
+    const m = new Map<string, { code: string; name: string; region: string; n: number }>()
+    for (const c of cities) { const e = m.get(c.country); if (e) e.n++; else m.set(c.country, { code: c.country, name: c.country_name, region: c.india ? 'India' : c.region, n: 1 }) }
+    return [...m.values()].sort((a, b) => (a.code === 'IN' ? -1 : b.code === 'IN' ? 1 : a.name.localeCompare(b.name)))
+  }, [cities])
   const flyTo = useCallback((lon: number, lat: number, range: number, pitch = -45, heading = 0) => setFly({ lon, lat, range, pitch, heading, key: Date.now() }), [])
+
+  const setCountry = useCallback((c: string | null) => {
+    setCountryRaw(c)
+    try { if (c) localStorage.setItem('aw-country', c); else localStorage.removeItem('aw-country') } catch { /* private mode */ }
+    if (!c) { setFly({ lon: 79, lat: 18, range: RANGE.world, pitch: -90, key: Date.now() }); return }
+    const cs = cities.filter((x) => x.country === c)
+    if (!cs.length) return
+    const lats = cs.map((x) => x.lat), lons = cs.map((x) => x.lon)
+    const span = Math.max(Math.max(...lats) - Math.min(...lats), Math.max(...lons) - Math.min(...lons))
+    setFly({ lon: (Math.min(...lons) + Math.max(...lons)) / 2, lat: (Math.min(...lats) + Math.max(...lats)) / 2,
+      range: Math.max(9e5, span * 1.9e5 + 6e5), pitch: -70, key: Date.now() })
+  }, [cities])
+
   const selectCity = useCallback((id: string | null, doFly = true) => {
     setSelectedCity(id)
     const c = cities.find((x) => x.id === id)
-    if (c && doFly) setFly({ lon: c.lon, lat: c.lat, range: RANGE.city * 3, pitch: -40, key: Date.now() })
-  }, [cities])
+    if (c && doFly) { setTrackT({ lon: c.lon, lat: c.lat, label: c.name }); setFly({ lon: c.lon, lat: c.lat, range: 2.6e5, pitch: -40, key: Date.now() }) }
+    if (mobile && id) setSheet('half')
+  }, [cities, mobile])
 
   const openPlace = useCallback((lat: number, lon: number, range = RANGE.street) => {
     setPlace({ lat, lon }); setPick({ lat, lon }); setModeRaw('place')
+    if (mobile) setSheet('half')
     const u = new URL(location.href); u.searchParams.set('mode', 'place'); u.searchParams.set('lat', lat.toFixed(5)); u.searchParams.set('lon', lon.toFixed(5))
     history.replaceState(null, '', u)
+    setTrackT({ lon, lat, label: `${lat.toFixed(3)}, ${lon.toFixed(3)}` })
     setFly({ lon, lat, range, pitch: -40, key: Date.now() })
+  }, [mobile])
+
+  const locateMe = useCallback(() => {
+    if (!navigator.geolocation) { setError('Location is not available in this browser.'); return }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const lat = pos.coords.latitude, lon = pos.coords.longitude
+      try { localStorage.setItem('aw-hub', JSON.stringify({ lat, lon })) } catch { /* private mode */ }
+      setHub({ lat, lon, intel: null }); setModeRaw('pulse'); setSelectedCity(null)
+      setFly({ lon, lat, range: 22000, pitch: -45, key: Date.now() })
+      try {
+        const i = await api.place(lat, lon); setHub({ lat, lon, intel: i })
+        if (i.place.country) { setCountryRaw(i.place.country); try { localStorage.setItem('aw-country', i.place.country) } catch { /* */ } }
+      } catch { /* keep hub without intel */ }
+      setLocating(false)
+    }, () => { setLocating(false); setError('Location permission denied — choose your country instead.') }, { timeout: 10000, enableHighAccuracy: false })
   }, [])
+  const clearHub = useCallback(() => { setHub(null); try { localStorage.removeItem('aw-hub') } catch { /* */ } }, [])
+  const track = useCallback((lon: number, lat: number, label: string) => { setTrackT({ lon, lat, label }); setFly({ lon, lat, range: 3500, pitch: -35, key: Date.now() }) }, [])
 
   const onHotspot = useCallback((h: Hotspot) => {
     setMode('detect')
+    setTrackT({ lon: h.lon, lat: h.lat, label: h.admin?.district || h.place.label })
     setFly({ lon: h.lon, lat: h.lat, range: 45000, pitch: -45, key: Date.now() })
     window.dispatchEvent(new CustomEvent('albedo:hotspot', { detail: h }))
   }, [setMode])
 
-  // fetch individual fire detections for the area in view once zoomed in
   const onView = useCallback((bbox: [number, number, number, number] | null, height: number) => {
     if (!bbox || height > 3.5e6) { setFireDets(null); return }
     const id = ++viewReq.current
     api.fires(bbox).then((f) => { if (id === viewReq.current) setFireDets(f) }).catch(() => {})
   }, [])
 
+  const onEvent = useCallback((e: LiveEvent) => {
+    if (e.kind === 'spike' && e.city) { setMode('pulse'); selectCity(e.city) }
+    else if (e.kind === 'report' && e.report) { setSelectedReport(e.report); setMode('citizen') }
+    else if (e.kind === 'alert') setMode('command')
+    else if (e.lat != null && e.lon != null) openPlace(e.lat, e.lon, e.kind === 'fire' ? 30000 : RANGE.street)
+  }, [setMode, selectCity, openPlace])
+
+  // ---- cinematic tour, built from live data ----
+  const stopTour = useCallback(() => { if (tourTimer.current) clearTimeout(tourTimer.current); tourTimer.current = null; setTour(null) }, [])
+  const startTour = useCallback(() => {
+    const s = pulse?.summary
+    const hs = hotspots?.hotspots?.[0]
+    const worst = [...cities].filter((c) => c.spike).sort((a, b) => b.spike!.peak - a.spike!.peak)[0]
+    const steps = [
+      { title: 'One planet, live', text: `${fmt(s?.cities)} cities across ${s?.countries ?? '…'} countries. Embers are today's ${fmt(fireFeed?.count)} NASA heat detections; streaks are real winds.`,
+        go: () => setFly({ lon: 20, lat: 10, range: 2.2e7, pitch: -90, duration: 3, key: Date.now() }) },
+      ...(worst ? [{ title: `${worst.name}: unhealthy air ahead`, text: `Forecast ${worst.index_system} ${worst.spike!.peak} (${worst.spike!.peak_category.label}) in ~${worst.spike!.lead_hours} h — ${worst.spike!.grap.name}.`,
+        go: () => setFly({ lon: worst.lon, lat: worst.lat, range: 1.6e6, pitch: -55, duration: 4, key: Date.now() }) }] : []),
+      { title: 'India, state by state', text: `53 cities on CPCB's NAQI with GRAP stages; forecasts corrected by a federation of Indian states that never share raw data.`,
+        go: () => setFly({ lon: 79, lat: 22, range: 4.2e6, pitch: -70, duration: 4, key: Date.now() }) },
+      ...(hs ? [{ title: `Hidden hotspot · ${hs.admin?.district || hs.place.label}`, text: hs.why,
+        go: () => { setTrackT({ lon: hs.lon, lat: hs.lat, label: hs.admin?.district || 'hotspot' }); setFly({ lon: hs.lon, lat: hs.lat, range: 30000, pitch: -40, duration: 5, key: Date.now() }) } }] : []),
+      { title: 'New Delhi at street level', text: 'Photorealistic 3D from Google, with live air quality measured right here. Click anywhere on Earth for the same view.',
+        go: () => { setTrackT({ lon: 77.2295, lat: 28.6129, label: 'India Gate' }); setFly({ lon: 77.2295, lat: 28.6129, range: 1600, pitch: -30, heading: 20, duration: 6, key: Date.now() }) } },
+    ]
+    setMode('pulse'); setSheet(mobile ? 'peek' : 'min')
+    let i = 0
+    const run = () => {
+      if (i >= steps.length) { setTour(null); return }
+      setTour({ step: i, steps }); steps[i].go(); i++
+      tourTimer.current = window.setTimeout(run, 9000)
+    }
+    run()
+  }, [pulse, hotspots, cities, fireFeed, setMode, mobile])
+
+  const feeds = [
+    { name: 'FIRMS', ageS: meta?.freshness?.fires ?? (fireFeed ? 0 : null) },
+    { name: 'CAMS', ageS: meta?.freshness?.city_series ?? (pulse ? 0 : null) },
+    { name: 'SENSORS', ageS: sensors ? 0 : null },
+    { name: 'WIND', ageS: wind.length ? 0 : null },
+  ]
+
   const ctx: Ctx = {
     meta, pulse, cities, hotspots, hotScope, setHotScope, reports, alerts, corridors, commons, fireInfo: fireFeed,
     selectedCity, selectCity, setMode, attribution, setAttribution, setPlume, pick, setPick, pickMode, setPickMode, flyTo,
     refreshReports, refreshAlerts, setCommons, reloadPulse, selectedReport, setSelectedReport, onHotspot, draftFor, setDraftFor,
-    place, openPlace, layers, setLayers,
+    place, openPlace, layers, setLayers, country, setCountry, countries, hub, locating, locateMe, clearHub, track,
   }
 
-  const frame = frameIdx != null ? frames[frameIdx] : null
+  const frame = replay && frameIdx != null ? frames[frameIdx] : null
   const nowIdx = frames.findIndex((f) => f.h === 0)
   const activeMode = mode === 'place' ? { label: 'Place', verb: 'Live at this spot', icon: '⌖' } : MODES.find((m) => m.id === mode)!
   const network = mode === 'commons' && commons ? commons.nodes.map((n) => ({ lat: n.lat, lon: n.lon, name: n.name })) : null
-  const frameStats = useMemo(() => {
-    if (!frame || !pulse) return null
-    let poor = 0, pop = 0
-    for (const c of pulse.cities) { const l = frame.level[c.id]; if (l != null && l >= 3) { poor++; pop += c.pop_m } }
-    return { poor, pop }
-  }, [frame, pulse])
+  const shownEvents = country ? events.filter((e) => !e.country || e.country === country) : events
+  const cycleSheet = () => setSheet((s) => (mobile ? (s === 'peek' ? 'half' : s === 'half' ? 'full' : 'peek') : s === 'open' ? 'min' : 'open'))
 
   return (
-    <div className="mc">
+    <div className={`mc ${hud ? 'hud-on' : ''} sheet-${sheet}`}>
       <Suspense fallback={<div className="map-loading"><Logo size={120} /></div>}>
         <Globe
           cities={cities} frameLevel={frame?.level ?? null} wind={wind}
@@ -212,15 +318,19 @@ export default function MissionControl() {
           hotspots={hotspots?.hotspots ?? []} reports={reports} corridors={corridors}
           trajectories={attribution?.paths ?? null} clusters={attribution?.clusters ?? []} plume={plume}
           network={network} selectedCity={selectedCity} selectedReport={selectedReport}
-          pick={pick} layers={layers} theme={theme} flyTo={fly}
+          pick={pick} hub={hub ? { lat: hub.lat, lon: hub.lon } : null} layers={layers} theme={theme}
+          sensor={sensor} hud={hud} autoPhotoreal={!mobile} track={trackT} flyTo={fly}
           onCity={(id) => { selectCity(id, true); if (mode !== 'trace' && mode !== 'command') setMode('pulse') }}
           onHotspot={onHotspot}
           onReport={(id) => { setSelectedReport(id); setMode('citizen') }}
           onPlace={(lat, lon) => { if (pickMode) { setPick({ lat, lon }); setPickMode(false) } else openPlace(lat, lon) }}
           onView={onView}
+          onTelemetry={hud ? setTel : undefined}
+          onUserMove={() => { if (tour) stopTour() }}
         />
       </Suspense>
       <div className="vignette" />
+      {hud && <Hud tel={tel} sensor={sensor} setSensor={setSensor} feeds={feeds} trackLabel={trackT?.label ?? null} onStopTrack={() => setTrackT(null)} />}
 
       <header className="mc-top">
         <a href="/" className="mc-brand" aria-label="Albedo-Watch home"><Logo size={34} /><Wordmark size={19} /></a>
@@ -232,10 +342,14 @@ export default function MissionControl() {
           ))}
         </nav>
         <div className="mc-status">
-          <button className="chip chip-btn" onClick={() => setFireHelp(!fireHelp)} title="What is a heat detection?">
-            <span className="live-dot" /> Live · {fmt(fireFeed?.count)} heat detections · {cities.length} cities <span className="q">?</span>
+          <select className="select country-select" value={country ?? ''} onChange={(e) => setCountry(e.target.value || null)} aria-label="Country">
+            <option value="">🌐 Whole world</option>
+            {countries.map((c) => <option key={c.code} value={c.code}>{c.name} ({c.n})</option>)}
+          </select>
+          <button className="chip chip-btn hide-m" onClick={() => setFireHelp(!fireHelp)} title="What is a heat detection?">
+            <span className="live-dot" /> {fmt(fireFeed?.count)} heat detections <span className="q">?</span>
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => setAskOpen(true)}>✦ Ask Albedo</button>
+          <button className="btn btn-primary btn-sm" onClick={() => setAskOpen(true)}>✦ Ask</button>
         </div>
       </header>
       {fireHelp && fireFeed && (
@@ -252,13 +366,19 @@ export default function MissionControl() {
         </div>
       )}
 
-      <aside className={`mc-panel glass ${mode}`} key={mode}>
-        <div className="mc-panel-head">
-          <div className="eyebrow">{activeMode.icon} {activeMode.label}</div>
-          <div className="mc-panel-title display">{activeMode.verb}</div>
-        </div>
+      <aside className={`mc-panel glass ${mode} s-${sheet}`} key={mode}>
+        <button className="mc-panel-head" onClick={cycleSheet} aria-label="Expand or collapse panel">
+          {mobile && <span className="grab" />}
+          <div className="mc-panel-head-row">
+            <div>
+              <div className="eyebrow">{activeMode.icon} {activeMode.label}{country ? ` · ${countries.find((c) => c.code === country)?.name ?? country}` : ''}</div>
+              <div className="mc-panel-title display">{activeMode.verb}</div>
+            </div>
+            <span className="chev">{mobile ? (sheet === 'full' ? '▾' : '▴') : sheet === 'open' ? '–' : '+'}</span>
+          </div>
+        </button>
         <div className="mc-panel-body scroll-y">
-          {error && <div className="err">{error} <button className="btn btn-ghost btn-sm" onClick={reloadPulse}>Retry</button></div>}
+          {error && <div className="err">{error} <button className="btn btn-ghost btn-sm" onClick={() => { setError(null); reloadPulse() }}>OK</button></div>}
           {pulse?.stale && mode === 'pulse' && <div className="note">Showing the last saved snapshot while live data refreshes…</div>}
           {mode === 'pulse' && <PulsePanel ctx={ctx} />}
           {mode === 'detect' && <DetectPanel ctx={ctx} />}
@@ -271,50 +391,57 @@ export default function MissionControl() {
         </div>
       </aside>
 
-      <div className="mc-legend glass">
+      <div className={`mc-legend glass ${layersOpen || legendOpen ? 'open' : ''}`}>
         <div className="seg theme-seg" role="group" aria-label="Imagery">
           {([['satellite', 'Satellite'], ['today', 'NASA today'], ['night', 'Night']] as const).map(([k, l]) => (
             <button key={k} className={theme === k ? 'on' : ''} onClick={() => setTheme(k)}>{l}</button>
           ))}
         </div>
-        <div className="eyebrow" style={{ margin: '10px 0 6px' }}>Air quality · NAQI (India) / US AQI</div>
-        <div className="legend-scale">{LEVEL_COLORS.map((c) => <div key={c} style={{ background: c }} />)}</div>
-        <div className="legend-lab"><span>Good</span><span>Moderate</span><span>Poor</span><span>Severe</span></div>
-        <button className="linkish layers-toggle" onClick={() => setLayersOpen(!layersOpen)}>{layersOpen ? '▾' : '▸'} Layers</button>
+        <div className="legend-tabs">
+          <button className={legendOpen ? 'on' : ''} onClick={() => { setLegendOpen(!legendOpen); setLayersOpen(false) }}>◧ Legend</button>
+          <button className={layersOpen ? 'on' : ''} onClick={() => { setLayersOpen(!layersOpen); setLegendOpen(false) }}>☰ Layers</button>
+          <button className={hud ? 'on' : ''} onClick={() => setHud(!hud)} title="God's-eye HUD: telemetry, detection boxes, sensor looks">⌖ HUD</button>
+        </div>
+        {legendOpen && <Legend compact />}
         {layersOpen && (
           <div className="layer-toggles">
-            {([['wind', 'Wind flow', '#8ce8ff'], ['fires', 'Satellite heat detections', '#ff8a3d'], ['sensors', 'Ground sensors', '#9ccc3a'],
+            {([['wind', 'Wind flow', '#8ce8ff'], ['fires', 'NASA heat detections', '#ff8a3d'], ['sensors', 'Ground sensors', '#9ccc3a'],
               ['hotspots', 'Hidden hotspots', '#f096ff'], ['reports', 'Citizen reports', '#f1e6c8'], ['corridors', 'Corridors (India)', '#f2c230'],
-              ['aq', 'Google live air-quality map', '#6fb6ff'], ['photoreal', 'Photorealistic 3D cities', '#ffffff'], ['sunlight', 'Real sunlight', '#ffe9a8']] as const).map(([k, label, c]) => (
+              ['aq', 'Google live air-quality map', '#6fb6ff'], ['photoreal', 'Photorealistic 3D (always)', '#ffffff'], ['sunlight', 'Real sunlight', '#ffe9a8']] as const).map(([k, label, c]) => (
               <label key={k} className="layer-toggle">
                 <input type="checkbox" checked={layers[k]} onChange={(e) => setLayers({ ...layers, [k]: e.target.checked })} />
                 <span className="dot" style={{ background: c, opacity: layers[k] ? 1 : 0.25 }} />{label}
               </label>
             ))}
+            <div className="fine" style={{ marginTop: 4 }}>3D cities switch on automatically below ~40 km.</div>
           </div>
         )}
       </div>
 
-      {frames.length > 0 && (
+      {replay && frames.length > 0 ? (
         <div className="mc-time glass">
           <button className="play" onClick={() => setPlaying(!playing)} aria-label={playing ? 'Pause' : 'Play forecast'}>{playing ? '❚❚' : '▶'}</button>
           <div className="time-body">
             <div className="time-row">
-              <span className="eyebrow">{frame ? (frame.h === 0 ? 'Now' : frame.h < 0 ? `${-frame.h} h ago` : `Forecast +${frame.h} h`) : 'Now'}</span>
-              <span className="mono muted" style={{ fontSize: 12 }}>{frame ? istTime(frame.t) : pulse ? istTime(pulse.generated_at) : ''} IST</span>
-              {frameStats && <span className="chip" style={{ marginLeft: 'auto' }}>{frameStats.poor} cities unhealthy+ · {fmt(frameStats.pop, 1)} M people</span>}
-              {frame && <button className="btn btn-ghost btn-sm" onClick={() => { setFrameIdx(null); setPlaying(false) }}>Back to now</button>}
+              <span className="eyebrow">Forecast replay · {frame ? (frame.h === 0 ? 'now' : frame.h < 0 ? `${-frame.h} h ago` : `+${frame.h} h`) : 'now'}</span>
+              <span className="mono muted" style={{ fontSize: 12 }}>{frame ? istTime(frame.t) : ''} IST · city colours show the forecast at this hour</span>
+              <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => { setReplay(false); setPlaying(false); setFrameIdx(null) }}>Close</button>
             </div>
             <input type="range" min={0} max={frames.length - 1} value={frameIdx ?? nowIdx} onChange={(e) => { setPlaying(false); setFrameIdx(+e.target.value) }} className="time-range" aria-label="Forecast time" />
             <div className="time-ticks mono"><span>−24 h</span><span>now</span><span>+24 h</span><span>+48 h</span><span>+72 h</span></div>
           </div>
         </div>
-      )}
+      ) : !tour && <EventFeed events={shownEvents} onPick={onEvent} mobile={mobile} />}
 
       <div className="view-btns">
         <button className="glass" title="Whole Earth" onClick={() => setFly({ lon: 79, lat: 18, range: RANGE.world, pitch: -90, key: Date.now() })}>◍</button>
-        <button className="glass" title="India" onClick={() => setFly({ lon: 80, lat: 17, range: 5.2e6, pitch: -75, key: Date.now() })}>IN</button>
+        <button className={`glass ${locating ? 'busy' : ''}`} title="My location" onClick={locateMe}>⌖</button>
+        <button className="glass" title="Forecast replay" onClick={() => { setReplay(true); setFrameIdx(nowIdx); setPlaying(true) }}>◷</button>
+        <button className="glass" title="Guided flight" onClick={() => (tour ? stopTour() : startTour())}>{tour ? '■' : '▶'}</button>
+        <button className="glass show-m" title="Legend" onClick={() => setLegendOpen(true)}>i</button>
       </div>
+      {tour && <TourCaption step={tour.step} total={tour.steps.length} title={tour.steps[tour.step].title} text={tour.steps[tour.step].text} onStop={stopTour} />}
+      {mobile && legendOpen && <div className="legend-sheet glass fade-up"><Legend onClose={() => setLegendOpen(false)} /></div>}
       {pickMode && <div className="pick-hint glass">Tap the globe where you saw pollution</div>}
       {askOpen && <AskDrawer ctx={ctx} onClose={() => setAskOpen(false)} />}
     </div>
