@@ -123,7 +123,7 @@ void main() {
   vec4 c = texture(colorTexture, v_textureCoordinates);
   float ld = texture(depthTexture, v_textureCoordinates).r;
   float d = 40000.0;
-  if (ld < 1.0) { vec4 e = czm_windowToEyeCoordinates(gl_FragCoord.xy, ld); d = length(e.xyz); }
+  if (ld < 1.0) { vec4 e = czm_windowToEyeCoordinates(gl_FragCoord.xy, ld); e /= e.w; d = length(e.xyz); }
   float f = clamp((1.0 - exp(-ext * d)) * fade, 0.0, 0.93);
   out_FragColor = vec4(mix(c.rgb, hazeColor, f), c.a);
 }`
@@ -381,10 +381,11 @@ export default function Globe(p: GlobeProps) {
     L.removeAll()
     const yday = day(1.5)
     const labels = () => {
-      const lbl = L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      const lbl = new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-        maximumLevel: 19, credit: 'Boundaries & places © Esri' }))
+        maximumLevel: 19, credit: 'Boundaries & places © Esri' }), { maximumTerrainLevel: 12 })
       lbl.alpha = 0.9
+      L.add(lbl)
     }
     if (p.theme === 'satellite') {
       L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
@@ -444,13 +445,13 @@ export default function Globe(p: GlobeProps) {
             polygonHierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ring)),
             height: base, extrudedHeight: top, vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
           }),
-          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(c.withAlpha(est ? 0.86 : 0.95)) },
+          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(est ? c : Cesium.Color.lerp(c, Cesium.Color.WHITE, 0.25, new Cesium.Color())) },
         }))
       } catch { /* degenerate footprint */ }
     }
     const prim = new Cesium.Primitive({
       geometryInstances: inst, asynchronous: true, releaseGeometryInstances: true,
-      appearance: new Cesium.PerInstanceColorAppearance({ translucent: true, closed: true }),
+      appearance: new Cesium.PerInstanceColorAppearance({ translucent: false, closed: true }),
     })
     v.scene.primitives.add(prim)
     bPrim.current = prim
