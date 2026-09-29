@@ -259,12 +259,13 @@ export default function MissionControl() {
     const same = (c: City3D | null) => !!c && c.lat === lat && c.lon === lon
     setCity3dRaw({ lat, lon, label: o.label ?? '', mode: m, b: null, loading: m === 'model', err: null, haze: true, ...z })
     setTrackT({ lon, lat, label: o.label || 'city' })
+    if (mobile) setSheet('peek')  // on a phone, give the 3D view the whole screen
     setFly({ lon, lat, range: m === 'model' ? 1150 : 950, pitch: -27, heading: 25, duration: 3, key: Date.now() })
     if (!o.intel) api.place(lat, lon).then((i) => setCity3dRaw((c) => (same(c) ? { ...c!, ...hazeOf(i) } : c))).catch(() => {})
     if (m === 'model') api.buildings(lat, lon, 750)
       .then((b) => setCity3dRaw((c) => (same(c) ? { ...c!, b, loading: false } : c)))
       .catch((e) => setCity3dRaw((c) => (same(c) ? { ...c!, loading: false, err: (e as Error).message } : c)))
-  }, [])
+  }, [mobile])
 
   const locateMe = useCallback(() => {
     if (!navigator.geolocation) { setError('Location is not available in this browser.'); return }

@@ -437,7 +437,7 @@ textarea.input { resize: vertical; }
   .country-select { max-width: 130px; font-size: 12px; padding: 6px 8px; }
   .mc-panel { top: auto !important; left: 0 !important; right: 0 !important; bottom: 0 !important; width: auto !important; border-radius: 22px 22px 0 0; }
   .mc-panel.s-peek { height: 96px; }
-  .mc-panel.s-half { height: 52vh; }
+  .mc-panel.s-half { height: 44vh; }
   .mc-panel.s-full { height: calc(100vh - 110px); }
   .mc-panel.s-peek .mc-panel-body { overflow: hidden; }
   .mc-panel-head { padding: 14px 18px 10px; }
