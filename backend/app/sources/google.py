@@ -112,13 +112,24 @@ async def streetview_meta(lat: float, lon: float, radius: int = 1000) -> dict:
     key = settings.maps_server_key
     if not key or settings.offline:
         return {}
+    # Prefer Google's own street imagery: "outdoor" still admits third-party photospheres
+    # (often shop interiors), so nudge the search a few tens of metres until a © Google pano turns up.
+    offsets = [(0, 0), (0.0006, 0), (-0.0006, 0), (0, 0.0006), (0, -0.0006), (0.0012, 0.0012), (-0.0012, -0.0012)]
+    first: dict = {}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(SV_META, params={"location": f"{lat},{lon}", "radius": radius, "source": "outdoor", "key": key})
-        d = r.json()
-        return d if d.get("status") == "OK" else {}
+            for dlat, dlon in offsets:
+                r = await client.get(SV_META, params={"location": f"{lat + dlat},{lon + dlon}", "radius": radius,
+                                                      "source": "outdoor", "key": key})
+                d = r.json()
+                if d.get("status") != "OK":
+                    continue
+                first = first or d
+                if "google" in (d.get("copyright") or "").lower():
+                    return d
+        return first
     except Exception:
-        return {}
+        return first
 
 
 async def streetview_image(lat: float, lon: float, heading: float | None = None, fov: int = 90) -> bytes | None:

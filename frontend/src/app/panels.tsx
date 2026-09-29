@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Alert, Cat, City, DraftBody, Hotspot, PlaceIntel, Report, SimResult } from '../lib/api'
 import { api } from '../lib/api'
@@ -443,7 +444,7 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
   const sv = d.imagery.streetview
   const c3 = ctx.city3d && Math.abs(ctx.city3d.lat - d.lat) < 1e-6 && Math.abs(ctx.city3d.lon - d.lon) < 1e-6 ? ctx.city3d : null
   const key = ctx.meta?.maps_browser_key
-  const svUrl = sv.available && key ? `https://www.google.com/maps/embed/v1/streetview?key=${key}&location=${sv.lat},${sv.lon}&heading=0&pitch=0&fov=90&source=outdoor` : null
+  const svUrl = sv.available && key ? `https://www.google.com/maps/embed/v1/streetview?key=${key}&${sv.pano ? `pano=${sv.pano}` : `location=${sv.lat},${sv.lon}&source=outdoor`}&heading=0&pitch=0&fov=90` : null
   return (
     <div className="stack">
       <div>
@@ -547,12 +548,11 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
       }}>▲ Draft alert for this place</button>
       <p className="fine">Authority: {d.authority}. Every number above carries its source; nothing is estimated unless labelled forecast.</p>
       {big && <div className="lightbox" onClick={() => setBig(null)}><img src={big} alt="" /></div>}
-      {sv360 && svUrl && (
+      {sv360 && svUrl && createPortal(
         <div className="sv-modal" onClick={() => setSv360(false)}>
           <button className="x" aria-label="Close" onClick={() => setSv360(false)}>×</button>
           <iframe src={svUrl} title="Google Street View 360" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" onClick={(e) => e.stopPropagation()} />
-        </div>
-      )}
+        </div>, document.body)}
     </div>
   )
 }

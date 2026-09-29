@@ -450,7 +450,8 @@ export default function Globe(p: GlobeProps) {
       } catch { /* degenerate footprint */ }
     }
     const prim = new Cesium.Primitive({
-      geometryInstances: inst, asynchronous: true, releaseGeometryInstances: true,
+      // built on the main thread: a brief one-off cost, but independent of worker scheduling
+      geometryInstances: inst, asynchronous: false, releaseGeometryInstances: true,
       appearance: new Cesium.PerInstanceColorAppearance({ translucent: false, closed: true }),
     })
     v.scene.primitives.add(prim)

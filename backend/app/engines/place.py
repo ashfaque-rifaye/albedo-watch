@@ -132,7 +132,9 @@ async def _intel(lat: float, lon: float) -> dict:
         "stations": {"count": len(off), "nearest": off[:5], "source": "OpenAQ" if stations else None},
         "imagery": {"satellite": gibs.recent(lat, lon),
                     "streetview": ({"available": True, "date": sv.get("date"), "lat": sv["location"]["lat"],
-                                    "lon": sv["location"]["lng"]} if sv.get("location") else {"available": False})},
+                                    "lon": sv["location"]["lng"], "pano": sv.get("pano_id"),
+                                    "official": "google" in (sv.get("copyright") or "").lower()}
+                                   if sv.get("location") else {"available": False})},
         "languages": langs[:4],
         "authority": authority_for_country(cc, geo.get("state")),
     }

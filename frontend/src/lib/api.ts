@@ -63,7 +63,7 @@ export type PlaceIntel = {
   fires: { within_50km: number; nearest: { lat: number; lon: number; km: number; frp: number; hours_ago: number; dir: string }[]; source: string }
   citizen_sensors: { count: number; median_pm25: number | null; nearest: { km: number; pm25: number; age_min: number }[]; source: string }
   stations: { count: number; nearest: { km: number; pm25: number; age_min: number }[]; source: string | null }
-  imagery: { satellite: { date: string; label: string; url: string }[]; streetview: { available: boolean; date?: string; lat?: number; lon?: number } }
+  imagery: { satellite: { date: string; label: string; url: string }[]; streetview: { available: boolean; date?: string; lat?: number; lon?: number; pano?: string; official?: boolean } }
   languages: string[]; authority: string
 }
 export type Fire = { lat: number; lon: number; frp: number; age_h: number }
