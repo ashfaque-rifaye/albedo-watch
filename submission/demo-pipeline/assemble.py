@@ -13,6 +13,8 @@ SCENES = [f"s{i}" for i in range(1, 12)]
 BROLL = {"s1": (MEDIA / "city.mp4", 4.5), "s5": (D / "broll" / "satellite.mp4", 3.5), "s7": (MEDIA / "citizen.mp4", 4.0),
          "s8": (MEDIA / "fields.mp4", 3.0), "s9": (D / "broll" / "officer.mp4", 3.5)}
 MARKS = json.loads((D / "marks.json").read_text())
+TEMPO = 1.2          # Gemini TTS narrates slowly; 1.2x ≈ 138 wpm, pitch preserved
+PAD = 0.4
 
 
 def dur(p):
@@ -39,7 +41,7 @@ for s in SCENES:
     broll = BROLL.get(s)
     bl = broll[1] if broll else 0.0
     delay = round(bl * 0.35, 2)              # let the opening shot breathe before the voice starts
-    target = dur(wav) + 0.6 + delay
+    target = dur(wav) / TEMPO + PAD + delay
     vd = dur(src)
     wins = windows(s, vd)
     app_len = sum(b - a for a, b in wins)
@@ -63,7 +65,7 @@ for s in SCENES:
         fc.append("[app]null[v]")
     ai = len(inputs) // 2
     inputs += ["-i", str(wav)]
-    fc.append(f"[{ai}:a]adelay={int(delay * 1000)}|{int(delay * 1000)},apad=pad_dur=1,atrim=duration={target:.3f},"
+    fc.append(f"[{ai}:a]atempo={TEMPO},adelay={int(delay * 1000)}|{int(delay * 1000)},apad=pad_dur=1,atrim=duration={target:.3f},"
               f"afade=t=in:d=0.2,afade=t=out:st={target - 0.3:.3f}:d=0.3[a]")
     out = D / f"{s}_fit.mp4"
     run([*inputs, "-filter_complex", ";".join(fc), "-map", "[v]", "-map", "[a]", "-t", f"{target:.3f}",

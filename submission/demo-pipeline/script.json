@@ -1,13 +1,46 @@
 [
-  {"id": "s1", "text": "Nine in ten people breathe air that fails the World Health Organization's guideline, yet most of the planet has no air monitor at all. India has a few hundred official stations for one point four billion people. This is Albedo-Watch: live air intelligence, built on Gemini and Google Maps, that finds hidden pollution, traces it, forecasts it, and puts the right action in front of the right official, in their own language."},
-  {"id": "s2", "text": "Mission Control is a live 3D Earth. Two hundred and thirty cities in over a hundred countries, each on its own national index: India's NAQI, the US AQI elsewhere. Tens of thousands of NASA fire detections from the last day, nine thousand citizen sensors, six and a half thousand official monitors from OpenAQ, and today's real winds. First-time visitors get a short guided tour."},
-  {"id": "s3", "text": "One tap on my location makes Chennai my hub: the air measured here right now by Google's Air Quality API, a twenty-four hour forecast corrected for this city, and advice in plain language."},
-  {"id": "s4", "text": "Click anywhere on Earth, and everything known about that exact spot comes together: Google's live air quality, today's NASA satellite image, nearby fires and sensors, and a local forecast. Switch to 3D, and the city rises from OpenStreetMap, wrapped in haze computed from the particles measured there right now. Street View puts you on the ground."},
-  {"id": "s5", "text": "Detect looks for what official networks miss. Satellite fire detections and verified citizen reports are checked against every reference monitor on OpenAQ. A place only qualifies with real evidence: repeated detections, dirty air around it in the CAMS model, and no monitor nearby. Each hotspot carries a confidence grade, and the satellite image to prove it."},
-  {"id": "s6", "text": "Lenses swap in real NASA measurements: aerosol haze seen from space, land-surface heat, and night lights, each with its own legend and date. The haze over the Indo-Gangetic plain is visible from orbit."},
-  {"id": "s7", "text": "Anyone can be a sensor. Here, a voice note in Punjabi, recorded for this demo, reports stubble burning near Amritsar. Gemini transcribes and translates it, classifies the source, and cross-checks it against NASA fires nearby. The report is verified, routed to the District Collector and the Punjab Pollution Control Board, and the citizen gets a reply in Punjabi, with a voice."},
-  {"id": "s8", "text": "Trace asks where a city's air comes from. Air parcels run forty-eight hours backwards through the live wind field and meet the fires they crossed, giving a transparent source breakdown that Gemini explains in plain language."},
-  {"id": "s9", "text": "Then one click turns a forecast into an order. Gemini drafts it for the responsible authority, with advisories in English and the local language, and reads today's satellite image as evidence. An officer reviews, approves and dispatches, and every step lands on an auditable ledger."},
-  {"id": "s10", "text": "Why trust the forecasts? Each state or country corrects the global model against its own monitors, and shares only what it learned, never the raw data. That is federated learning: forecast error falls by over forty percent, and even a place with no monitors of its own gets about a quarter better."},
-  {"id": "s11", "text": "Albedo-Watch runs on Gemini, Google Maps Platform, Cloud Run and Firestore, with open NASA, Copernicus and OpenAQ data. Built for India, and designed for any BRICS partner to join by adding data, not code. Albedo-Watch. Every breath, traced."}
+ {
+  "id": "s1",
+  "text": "Ninety-nine percent of people breathe air that fails the World Health Organization's guideline, yet most of the planet has no air monitor at all. India has about five hundred and fifty continuous monitoring stations for one point four billion people. This is Albedo-Watch: live air intelligence, built on Gemini and Google Maps, that finds hidden pollution, traces it, forecasts it, and puts the right action in front of the right official, in their own language."
+ },
+ {
+  "id": "s2",
+  "text": "Mission Control is a live 3D Earth. Two hundred and thirty cities in over a hundred countries, each on its own national index: India's NAQI, the US AQI elsewhere. Tens of thousands of NASA fire detections from the last day, nine thousand citizen sensors, six and a half thousand official monitors from OpenAQ, and today's real winds. First-time visitors get a short guided tour."
+ },
+ {
+  "id": "s3",
+  "text": "One tap on my location makes Chennai my hub: the air measured here right now by Google's Air Quality API, a twenty-four hour forecast corrected for this city, and advice in plain language."
+ },
+ {
+  "id": "s4",
+  "text": "Click anywhere on Earth, and everything known about that exact spot comes together: Google's live air quality, today's NASA satellite image, nearby fires and sensors, and a local forecast. Switch to 3D, and the city rises from OpenStreetMap, wrapped in haze computed from the particles measured there right now. Street View puts you on the ground."
+ },
+ {
+  "id": "s5",
+  "text": "Detect looks for what official networks miss. Satellite fire detections and verified citizen reports are checked against every reference monitor on OpenAQ. A place only qualifies with real evidence: repeated detections, dirty air around it in the CAMS model, and no monitor nearby. Each hotspot carries a confidence grade, and the satellite image to prove it."
+ },
+ {
+  "id": "s6",
+  "text": "Lenses swap in real NASA measurements: aerosol haze seen from space, land-surface heat, and night lights, each with its own legend and date. The haze over the Indo-Gangetic plain is visible from orbit."
+ },
+ {
+  "id": "s7",
+  "text": "Anyone can be a sensor. Here, a voice note in Punjabi, recorded for this demo, reports stubble burning near Amritsar. Gemini transcribes and translates it, classifies the source, and cross-checks it against NASA fires nearby. The report is verified, routed to the District Collector and the Punjab Pollution Control Board, and the citizen gets a reply in Punjabi, with a voice."
+ },
+ {
+  "id": "s8",
+  "text": "Trace asks where a city's air comes from. Air parcels run forty-eight hours backwards through the live wind field and meet the fires they crossed, giving a transparent source breakdown that Gemini explains in plain language."
+ },
+ {
+  "id": "s9",
+  "text": "Then one click turns a forecast into an order. Gemini drafts it for the responsible authority, with advisories in English and the local language, and reads today's satellite image as evidence. An officer reviews, approves and dispatches, and every step lands on an auditable ledger."
+ },
+ {
+  "id": "s10",
+  "text": "Why trust the forecasts? Each state or country corrects the global model against its own monitors, and shares only what it learned, never the raw data. That is federated learning. In today's test, forecast error fell by half, and even a place with no monitors of its own got about a third better."
+ },
+ {
+  "id": "s11",
+  "text": "Albedo-Watch runs on Gemini, Google Maps Platform, Cloud Run and Firestore, with open NASA, Copernicus and OpenAQ data. Built for India, and designed for any BRICS partner to join by adding data, not code. Albedo-Watch. Every breath, traced."
+ }
 ]

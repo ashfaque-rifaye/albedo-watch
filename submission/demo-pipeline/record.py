@@ -71,7 +71,9 @@ async def s4(pg, T, c):
     await b3.wait_for(timeout=90000); c.mark("start"); await pg.wait_for_timeout(4500)
     await smooth_scroll(pg, 420, 2500, PANEL); await pg.wait_for_timeout(1500)
     await smooth_scroll(pg, 0, 1200, PANEL)
-    await b3.click(); await pg.wait_for_timeout(14000)
+    await b3.click()
+    await pg.get_by_text(re.compile(r"buildings within")).wait_for(timeout=60000)
+    await pg.wait_for_timeout(11000)
     sv = pg.get_by_role("button", name="◉ Street View 360°")
     if await sv.count():
         await sv.click(); await pg.wait_for_timeout(6500)
@@ -129,18 +131,18 @@ async def s9(pg, T, c):
     await draft.click(); await pg.wait_for_timeout(2500)
     await pg.get_by_role("button", name="✦ Draft with Gemini").click(); c.mark("send")
     await pg.wait_for_selector(".flow", timeout=150000); c.mark("done")
-    await pg.wait_for_timeout(4000)
-    await smooth_scroll(pg, 520, 4000, PANEL); await pg.wait_for_timeout(2500)
-    await smooth_scroll(pg, 1000, 3000, PANEL)
+    await pg.wait_for_timeout(2500)
+    await smooth_scroll(pg, 520, 3000, PANEL); await pg.wait_for_timeout(1500)
+    await smooth_scroll(pg, 1000, 2500, PANEL)
     seg = pg.locator(".mc-panel .seg button")
     if await seg.count() > 1:
-        await seg.nth(1).click(); await pg.wait_for_timeout(3000)
-    await smooth_scroll(pg, 1600, 3000, PANEL); await pg.wait_for_timeout(1200)
+        await seg.nth(1).click(); await pg.wait_for_timeout(2200)
+    await smooth_scroll(pg, 1600, 2500, PANEL); await pg.wait_for_timeout(800)
     for label in ("Approve", "Dispatch"):
         b = pg.get_by_role("button", name=re.compile(f"^{label}"))
         if await b.count():
-            await b.first.click(); await pg.wait_for_timeout(2200)
-    await smooth_scroll(pg, 4000, 2500, PANEL); await pg.wait_for_timeout(2500)
+            await b.first.click(); await pg.wait_for_timeout(1800)
+    await smooth_scroll(pg, 4000, 2000, PANEL); await pg.wait_for_timeout(1500)
 
 
 async def s10(pg, T, c):

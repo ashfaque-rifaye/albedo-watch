@@ -443,7 +443,7 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
   const sv = d.imagery.streetview
   const c3 = ctx.city3d && Math.abs(ctx.city3d.lat - d.lat) < 1e-6 && Math.abs(ctx.city3d.lon - d.lon) < 1e-6 ? ctx.city3d : null
   const key = ctx.meta?.maps_browser_key
-  const svUrl = sv.available && key ? `https://www.google.com/maps/embed/v1/streetview?key=${key}&location=${sv.lat},${sv.lon}&heading=0&pitch=0&fov=90` : null
+  const svUrl = sv.available && key ? `https://www.google.com/maps/embed/v1/streetview?key=${key}&location=${sv.lat},${sv.lon}&heading=0&pitch=0&fov=90&source=outdoor` : null
   return (
     <div className="stack">
       <div>
