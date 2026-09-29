@@ -23,7 +23,7 @@ function Film({ src, className = '', dim = 0.45 }: { src: string; className?: st
   if (!ok) return null
   return (
     <>
-      <video ref={v} className={`film ${className}`} src={src} muted loop playsInline preload="metadata" onError={() => setOk(false)} />
+      <video ref={v} className={`film ${className}`} src={src} poster={src.replace(/\.mp4$/, '.jpg')} muted loop playsInline preload="metadata" onError={() => setOk(false)} />
       <div className="film-dim" style={{ background: `rgba(4,6,10,${dim})` }} />
     </>
   )
