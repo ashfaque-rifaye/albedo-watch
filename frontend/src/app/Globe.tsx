@@ -288,10 +288,13 @@ export default function Globe(p: GlobeProps) {
     }
     cv.addEventListener('pointerdown', userMoved); cv.addEventListener('wheel', userMoved, { passive: true })
     let lastTel = 0, frames = 0, fps = 60, fpsT = performance.now(), slow = 0, fast = 0
+    let lastTick = performance.now()
     v.clock.onTick.addEventListener(() => {
-      if (idle.current && v.camera.positionCartographic.height > 8e6) v.camera.rotate(Cesium.Cartesian3.UNIT_Z, -0.0004)
+      // motion is time-based, so a 144 Hz display doesn't spin the planet 2.4x faster
+      const tick = performance.now(), k = Math.min(4, (tick - lastTick) / 16.67); lastTick = tick
+      if (idle.current && v.camera.positionCartographic.height > 8e6) v.camera.rotate(Cesium.Cartesian3.UNIT_Z, -0.0004 * k)
       const o = orbit.current
-      if (o) { o.heading += 0.0009; v.camera.lookAt(o.center, new Cesium.HeadingPitchRange(o.heading, o.pitch, o.range)) }
+      if (o) { o.heading += 0.0009 * k; v.camera.lookAt(o.center, new Cesium.HeadingPitchRange(o.heading, o.pitch, o.range)) }
       const hgt = v.camera.positionCartographic.height
       hazeFade.current = Math.max(0, Math.min(1, (30_000 - hgt) / 15_000))
       hz.enabled = P.current.haze != null && hazeFade.current > 0
@@ -355,9 +358,19 @@ export default function Globe(p: GlobeProps) {
       updateGround()
     }
     v.camera.moveEnd.addEventListener(report)
-    v.scene.postRender.addEventListener(() => drawOverlay())
+    v.scene.postRender.addEventListener(() => {
+      try { drawOverlay() } catch (e) { console.warn('[albedo] overlay frame skipped', e) }
+    })
+    // Watchdog: Cesium stops its render loop on any exception outside scene.render
+    // (e.g. in a clock listener). Restart it instead of leaving a frozen globe.
+    const dog = window.setInterval(() => {
+      if (viewer.current === v && !v.isDestroyed() && !v.useDefaultRenderLoop) {
+        console.warn('[albedo] render loop restarted')
+        v.resize(); v.useDefaultRenderLoop = true
+      }
+    }, 1500)
     setReady(true)
-    return () => { h.destroy(); v.destroy(); viewer.current = null }
+    return () => { window.clearInterval(dog); h.destroy(); v.destroy(); viewer.current = null }
   }, [])
 
   // ---------------------------------------------------------------- imagery theme, HD tiles & lenses
@@ -691,7 +704,7 @@ export default function Globe(p: GlobeProps) {
       for (const c of S.cities) {
         if (!c.spike) continue
         const a = proj(c.lon, c.lat); if (!a) continue
-        const ph = ((t / 1400) + c.lat) % 1
+        const ph = ((((t / 1400) + c.lat) % 1) + 1) % 1
         g.beginPath(); g.arc(a[0], a[1], 8 + ph * 24, 0, Math.PI * 2)
         g.strokeStyle = `rgba(240,138,36,${0.8 * (1 - ph)})`; g.lineWidth = 1.6; g.stroke()
       }
@@ -705,7 +718,7 @@ export default function Globe(p: GlobeProps) {
           const idx = toEnd ? head - s : head + s
           if (idx < 0 || idx >= L) break
           const q = path[idx], a = proj(q[0], q[1], 800 + q[2] * 40 - off); if (!a) continue
-          g.beginPath(); g.arc(a[0], a[1], 3.2 - s * 0.25, 0, Math.PI * 2); g.fillStyle = `rgba(${rgb},${0.95 - s * 0.09})`; g.fill()
+          g.beginPath(); g.arc(a[0], a[1], Math.max(0.5, 3.2 - s * 0.25), 0, Math.PI * 2); g.fillStyle = `rgba(${rgb},${0.95 - s * 0.09})`; g.fill()
         }
       }
     }
