@@ -191,16 +191,26 @@ async def find(scope: str = "world", limit: int = 20) -> dict:
         h["priority"] = round(h["score"] * impact * conf * (0.25 + math.log1p(10 * dw["pop_at_risk_m"])), 3)
 
     await asyncio.gather(*(enrich(h, v) for h, v in zip(top, pm)))
+    # A fire that leaves the surrounding air clean is not a pollution hotspot (reports still count).
+    top = [h for h in top if h["impact"] != "low" or h["reports"]]
     top.sort(key=lambda h: -h["priority"])
-    top = top[:limit]
     yday = dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=1)
+    shown: list[dict] = []
     for h in top:  # Google geocoding only for what we show, cached per 0.1°
+        if len(shown) >= limit:
+            break
         key = (round(h["lat"] * 10), round(h["lon"] * 10))
         if key not in _geo_cache:
             _geo_cache[key] = await google.reverse_geocode(h["lat"], h["lon"])
         h["admin"] = _geo_cache[key]
+        # The India view is India only: the bounding box also covers neighbours.
+        country = h["admin"].get("country") or h["place"].get("country")
+        if scope == "india" and country != "IN":
+            continue
         h["why"] = _why(h)
         h["image"] = {"url": gibs.snapshot_url(h["lat"], h["lon"], yday, half_deg=0.25, width=640), "date": yday.isoformat()}
+        shown.append(h)
+    top = shown
     known = ranked if (sites or scope == "india") else [h for h in ranked if 6 <= h["lat"] <= 37.5 and 68 <= h["lon"] <= 97.5]
     return {
         "scope": scope, "hotspots": top, "cells_scanned": len(cells), "fires": len(fires), "reports": len(reports),

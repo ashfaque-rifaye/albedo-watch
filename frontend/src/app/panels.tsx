@@ -266,7 +266,7 @@ export function DetectPanel({ ctx }: { ctx: Ctx }) {
             <li>At least 3 NASA VIIRS heat detections (or 40 MW of fire power) in 24 h, or a verified citizen report. Single specks are ignored.</li>
             <li>Nearby detections within 100 km count as one fire complex.</li>
             <li>No reference monitor close by ({hs.official_source}{hs.monitor_sites ? `, ${fmt(hs.monitor_sites)} sites worldwide` : ''}); citizen sensors count as partial coverage.</li>
-            <li>Weighted by the PM2.5 the CAMS model sees at the site, by detection confidence, and by people downwind in 12 h.</li>
+            <li>The air around it must be dirty: fires where the CAMS model sees clean air (PM2.5 under 12 µg/m³) are dropped. Then weighted by detection confidence and by people in cities downwind within 12 h.</li>
           </ol>
         </details>
         <div className="stats-2">
@@ -310,7 +310,7 @@ export function DetectPanel({ ctx }: { ctx: Ctx }) {
               <button key={i} className={`row ${sel && sel.lat === h.lat && sel.lon === h.lon ? 'active' : ''}`} onClick={() => { setSel(h); ctx.onHotspot(h) }}>
                 <span className="rank-pill">{i + 1}</span>
                 <div className="row-main">
-                  <div className="row-t">{h.confidence && <span className={`conf ${h.confidence}`} style={{ marginRight: 6 }}>{h.confidence[0].toUpperCase()}</span>}{h.admin?.district || h.place.label}{h.admin?.country ? <span className="muted"> · {h.admin.state || h.admin.country}</span> : null}</div>
+                  <div className="row-t">{h.confidence && <span className={`conf ${h.confidence}`} style={{ marginRight: 6 }}>{h.confidence[0].toUpperCase()}</span>}{h.admin?.district || h.place.label}<span className="muted"> · {h.admin?.locality && h.admin.locality !== h.admin.district ? `${h.admin.locality}, ` : ''}{h.admin?.state || h.admin?.country || h.place.label}</span></div>
                   <div className="row-s">{h.fires} detections · max {h.frp_max.toFixed(0)} MW{h.site_pm25 != null ? ` · PM2.5 ${fmt(h.site_pm25, 0)}` : ''} · monitor {h.nearest_monitor_km != null ? `${h.nearest_monitor_km} km` : hs.official_coverage_known || (h.lat > 6 && h.lat < 37.5 && h.lon > 68 && h.lon < 97.5) ? '>100 km' : 'unknown'}{h.downwind.cities[0] ? ` · → ${h.downwind.cities[0].name}` : ''}</div>
                 </div>
               </button>
