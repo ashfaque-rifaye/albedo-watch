@@ -89,3 +89,43 @@ async def fetch_openaq(max_pages: int = 40) -> list[dict]:
             await asyncio.sleep(0.3)
     log.info("OpenAQ: %d stations reporting PM2.5 in the last 6 h", len(out))
     return out
+
+
+OPENAQ_LOCATIONS = "https://api.openaq.org/v3/locations"
+
+
+async def fetch_openaq_monitors(max_pages: int = 40) -> list[dict]:
+    """Reference-grade monitor *sites* (OpenAQ ``monitor=true``) active in the last 30 days.
+
+    This is the official coverage map: a site counts even if its latest hour is
+    missing. Low-cost sensors that OpenAQ also aggregates are excluded here.
+    """
+    headers = {"X-API-Key": settings.openaq_api_key, "User-Agent": "Albedo-Watch/1.0"}
+    out: list[dict] = []
+    cutoff = time.time() - 30 * 86400
+    async with httpx.AsyncClient(timeout=60, headers=headers) as client:
+        for page in range(1, max_pages + 1):
+            r = await client.get(OPENAQ_LOCATIONS, params={"limit": 1000, "page": page, "monitor": "true", "parameters_id": 2})
+            if r.status_code == 429:
+                await asyncio.sleep(3)
+                continue
+            if r.status_code != 200:
+                log.warning("OpenAQ locations HTTP %s", r.status_code)
+                break
+            res = r.json().get("results", [])
+            for x in res:
+                try:
+                    last = (x.get("datetimeLast") or {}).get("utc")
+                    t = int(datetime.fromisoformat(last.replace("Z", "+00:00")).timestamp()) if last else 0
+                    c = x["coordinates"]
+                except (KeyError, TypeError, ValueError, AttributeError):
+                    continue
+                if t < cutoff:
+                    continue
+                out.append({"id": x.get("id"), "lat": round(c["latitude"], 4), "lon": round(c["longitude"], 4),
+                            "name": x.get("name"), "cc": (x.get("country") or {}).get("code"), "t": t})
+            if len(res) < 1000:
+                break
+            await asyncio.sleep(0.3)
+    log.info("OpenAQ: %d reference monitor sites active in the last 30 days", len(out))
+    return out

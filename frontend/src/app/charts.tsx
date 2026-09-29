@@ -60,7 +60,7 @@ export function ForecastChart({ d, system = 'NAQI', height = 170 }: { d: Forecas
           <circle cx={pts[h]![0]} cy={pts[h]![1]} r={4.5} fill={LVL[Math.max(0, d.level[h])]} stroke="#0e121b" strokeWidth={2} />
         </g>}
       </svg>
-      {vals[h] != null && (
+      {hover != null && vals[h] != null && (
         <div className="chart-tip" style={{ left: `${(x(h) / W) * 100}%` }}>
           <b className="mono">{vals[h]}</b> {system} · {istHour(d.time[h])}
           {d.pm25 && <div className="muted">PM2.5 {fmt(d.pm25[h], 0)} µg/m³{d.pm25_cams && <span style={{ opacity: .7 }}> (global model {fmt(d.pm25_cams[h], 0)})</span>}</div>}

@@ -41,9 +41,13 @@ export type Hotspot = {
   frp_max: number; newest: number; nearest_monitor_km: number | null; nearest_sensor_km: number | null
   reports: number; place: Place; admin: Record<string, string>; why: string
   downwind: { cities: { id: string; name: string; pop_m: number; eta_h: number }[]; pop_at_risk_m: number }
+  confidence?: 'high' | 'medium' | 'low'; satellites?: string[]; span_h?: number; site_pm25?: number | null
+  impact?: 'low' | 'moderate' | 'high' | null; merged?: number; complex_fires?: number; image?: { url: string; date: string }
 }
+export type BuildingSet = { buildings: [number, number, number, number[]][]; count: number; mapped_height_share: number; radius_m: number; source: string }
 export type Hotspots = { scope: string; hotspots: Hotspot[]; cells_scanned: number; fires: number; reports: number; sensors: number; stations: number
-  official_source: string; official_coverage_known?: boolean; unmonitored_share: number; method: string; stale?: boolean }
+  official_source: string; official_coverage_known?: boolean; unmonitored_share: number; method: string; stale?: boolean
+  monitor_sites?: number; candidates?: number }
 export type FireSummary = { count: number; large: number; median_frp: number | null; definition: string }
 export type FireFeed = FireSummary & { mode: 'aggregate' | 'detections'; bins?: [number, number, number, number, number][]; fires?: [number, number, number, number][] }
 export type Sensors = { citizen: [number, number, number, number][]; stations: [number, number, number, number][]; sources: Record<string, string> }
@@ -157,6 +161,7 @@ export const api = {
   wind: (h = 0, scope: 'global' | 'india' = 'global') => req<{ vectors: WindVec[]; step: number }>(`/api/wind?h=${h}&scope=${scope}`),
   fires: (bbox?: [number, number, number, number]) => req<FireFeed>(bbox ? `/api/fires?bbox=${bbox.map((v) => v.toFixed(2)).join(',')}` : '/api/fires'),
   attribution: (id: string) => req<Attribution>(`/api/attribution/${id}`, undefined, 90000),
+  buildings: (lat: number, lon: number, r = 700) => req<BuildingSet>(`/api/buildings?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}&r=${r}`, undefined, 45000),
   hotspots: (scope: 'world' | 'india' = 'world') => req<Hotspots>(`/api/hotspots?scope=${scope}`, undefined, 90000),
   simulate: (city: string, measures: string[], compliance: number) => post<SimResult>('/api/simulate', { city, measures, compliance }),
   reports: () => req<{ reports: Report[] }>('/api/reports'),

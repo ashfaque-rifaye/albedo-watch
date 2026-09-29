@@ -61,11 +61,14 @@ async def fetch_fires() -> list[dict]:
         k = (round(f["lat"] / 0.01), round(f["lon"] / 0.01))
         b = bins.get(k)
         if b is None:
-            bins[k] = {**f, "n": 1}
+            bins[k] = {**f, "n": 1, "sats": [f["sensor"]], "t0": f["t"]}
         else:
             b["n"] += 1
             b["frp"] = max(b["frp"], f["frp"])
             b["t"] = max(b["t"], f["t"])
+            b["t0"] = min(b["t0"], f["t"])
+            if f["sensor"] not in b["sats"]:
+                b["sats"].append(f["sensor"])
     fires = sorted(bins.values(), key=lambda f: -f["frp"])
     log.info("FIRMS: %d raw → %d fires", len(raw), len(fires))
     return fires

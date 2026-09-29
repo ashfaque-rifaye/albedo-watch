@@ -204,10 +204,20 @@ async def citizen_sensors() -> list[dict]:
     return await cached_or_offline("sensors", 15 * 60, sensors.fetch_sensor_community)
 
 
-async def stations() -> list[dict]:
+async def monitor_sites() -> list[dict]:
+    """Official reference-monitor locations worldwide (OpenAQ), refreshed daily."""
     if not settings.openaq_api_key:
         return []
-    return await cached_or_offline("openaq", 60 * 60, sensors.fetch_openaq)
+    return await cached_or_offline("openaq_sites", 24 * 3600, sensors.fetch_openaq_monitors) or []
+
+
+async def stations() -> list[dict]:
+    """Latest PM2.5 from official monitors only (low-cost feeds on OpenAQ are dropped)."""
+    if not settings.openaq_api_key:
+        return []
+    latest = await cached_or_offline("openaq", 60 * 60, sensors.fetch_openaq) or []
+    ids = {s["id"] for s in await monitor_sites()}
+    return [x for x in latest if x.get("id") in ids] if ids else latest
 
 
 # --------------------------------------------------------------------------- #
@@ -247,7 +257,7 @@ def _synthetic(key: str):
         now = hrs[72]
         return [{"lat": 30.2 + 0.05 * k, "lon": 75.0 + 0.07 * k, "frp": 12.0 + k, "t": now - 3600 * (k % 20),
                  "conf": "n", "sensor": "synthetic", "day": True, "n": 1} for k in range(40)]
-    if key in ("sensors", "openaq"):
+    if key in ("sensors", "openaq", "openaq_sites"):
         return []
     if key == "wind_global" or key.startswith("wind:"):
         return _synthetic("wind")
@@ -268,7 +278,7 @@ def city(cid: str):
 async def warm() -> None:
     """Background warm-up so the first page view is instant."""
     for name, fn in (("city_series", city_series), ("wind", wind_field), ("fires", fires), ("truth", truth),
-                     ("wind_global", global_wind), ("sensors", citizen_sensors), ("openaq", stations)):
+                     ("wind_global", global_wind), ("sensors", citizen_sensors), ("openaq_sites", monitor_sites), ("openaq", stations)):
         try:
             await fn()
             log.info("warmed %s", name)

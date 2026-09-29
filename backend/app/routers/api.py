@@ -19,7 +19,7 @@ from ..config import settings
 from ..engines import attribution, datahub, federated, forecast, hotspots, place, response
 from ..engines.naqi import category, grap_stage
 from ..registry import CITY_BY_ID, COUNTRIES, LANGUAGE_NAMES, STATES, WORLD_COUNTRIES, languages_for_country, languages_of
-from ..sources import cache, gibs, google
+from ..sources import cache, gibs, google, osm
 from ..store import store
 
 log = logging.getLogger("albedo.api")
@@ -279,6 +279,15 @@ async def streetview(lat: float, lon: float, heading: float | None = None):
     if not img:
         raise HTTPException(404, "no Street View imagery near this point")
     return Response(content=img, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/buildings")
+async def buildings(lat: float = Query(ge=-85, le=85), lon: float = Query(ge=-180, le=180), r: int = Query(700, ge=150, le=1200)):
+    """OpenStreetMap footprints around a point, extruded client-side into the 3D city view."""
+    try:
+        return await osm.buildings(lat, lon, r)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
 
 
 # --------------------------------------------------------------------------- #

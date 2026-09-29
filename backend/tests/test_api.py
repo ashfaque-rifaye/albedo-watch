@@ -136,3 +136,19 @@ def test_event_feed(client):
     e = client.get("/api/events").json()["events"]
     assert e and all({"id", "kind", "title", "t"} <= set(x) for x in e)
     assert client.get("/api/events", params={"limit": 500}).status_code == 422
+
+
+def test_buildings_for_3d_city(client):
+    b = client.get("/api/buildings?lat=13.08&lon=80.27").json()
+    assert b["count"] == len(b["buildings"]) > 0
+    base, top, est, ring = b["buildings"][0]
+    assert top > base and est in (0, 1) and len(ring) >= 6
+    assert client.get("/api/buildings?lat=99&lon=80").status_code == 422
+
+
+def test_hotspots_are_graded(client):
+    hs = client.get("/api/hotspots?scope=india").json()
+    for h in hs["hotspots"]:
+        assert h["confidence"] in ("high", "medium", "low")
+        assert h["fires"] >= 3 or h["frp"] >= 40 or h["reports"]
+        assert h["image"]["url"].startswith("https://")

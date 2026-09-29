@@ -259,7 +259,16 @@ export function DetectPanel({ ctx }: { ctx: Ctx }) {
         {(['world', 'india'] as const).map((s) => <button key={s} className={ctx.hotScope === s ? 'on' : ''} onClick={() => { setSel(null); ctx.setHotScope(s) }}>{s === 'world' ? 'Whole world' : 'India'}</button>)}
       </div>
       {!hs ? <Loading lines={6} label="Scanning the planet for heat and reports where no monitor is watching…" /> : (<>
-        <p className="lede">Official monitors cluster in big cities. These are places where satellites or citizens see pollution and <b>no official monitor is nearby</b> — ranked by how many people live downwind.</p>
+        <p className="lede">Official monitors cluster in big cities. These are places where NASA satellites or verified citizens see a pollution source, <b>no official monitor is nearby</b>, and the modelled air around it is actually dirty, ranked by how many people live downwind.</p>
+        <details className="explain">
+          <summary>How a place qualifies</summary>
+          <ol>
+            <li>At least 3 NASA VIIRS heat detections (or 40 MW of fire power) in 24 h, or a verified citizen report. Single specks are ignored.</li>
+            <li>Nearby detections within 100 km count as one fire complex.</li>
+            <li>No reference monitor close by ({hs.official_source}{hs.monitor_sites ? `, ${fmt(hs.monitor_sites)} sites worldwide` : ''}); citizen sensors count as partial coverage.</li>
+            <li>Weighted by the PM2.5 the CAMS model sees at the site, by detection confidence, and by people downwind in 12 h.</li>
+          </ol>
+        </details>
         <div className="stats-2">
           <Stat value={`${Math.round(hs.unmonitored_share * 100)}%`} label={hs.official_coverage_known ? 'of evidence sits more than 25 km from any official monitor' : 'of evidence in India sits more than 25 km from an official monitor (station locations elsewhere pending OpenAQ)'} tone="#f096ff" />
           <Stat value={fmt(hs.sensors)} label={`open citizen sensors counted as partial coverage${hs.stations ? ` · ${fmt(hs.stations)} official stations` : ''}`} tone="#9ccc3a" />
@@ -272,9 +281,22 @@ export function DetectPanel({ ctx }: { ctx: Ctx }) {
               <div><b className="mono">{sel.fires}</b><span>heat detections (24 h)</span></div>
               <div><b className="mono">{sel.frp_max.toFixed(0)} MW</b><span>largest fire</span></div>
               <div><b className="mono">{sel.nearest_monitor_km != null ? `${sel.nearest_monitor_km} km` : hs.official_coverage_known || (sel.lat > 6 && sel.lat < 37.5 && sel.lon > 68 && sel.lon < 97.5) ? '> 100 km' : 'unknown'}</b><span>to nearest official monitor</span></div>
-              <div><b className="mono">{fmt(sel.downwind.pop_at_risk_m, 2)} M</b><span>people downwind (12 h)</span></div>
+              <div><b className="mono">{sel.downwind.pop_at_risk_m >= 0.01 ? `${fmt(sel.downwind.pop_at_risk_m, 2)} M` : 'none'}</b><span>{sel.downwind.pop_at_risk_m >= 0.01 ? 'people in cities downwind (12 h)' : 'no tracked city downwind in 12 h'}</span></div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {sel.confidence && <span className={`conf ${sel.confidence}`}>{sel.confidence.toUpperCase()} CONFIDENCE</span>}
+              {sel.satellites?.length ? <span className="chip mono">{sel.satellites.join(' + ')}</span> : null}
+              {sel.span_h ? <span className="chip mono">seen over {sel.span_h} h</span> : null}
+              {sel.site_pm25 != null && <span className="chip mono">CAMS PM2.5 {fmt(sel.site_pm25, 0)} µg/m³</span>}
+              {sel.merged ? <span className="chip mono">+{sel.merged} nearby cells</span> : null}
             </div>
             <p style={{ margin: 0, fontSize: 13.5 }}>{sel.why}</p>
+            {sel.image && (
+              <figure className="shot wide" style={{ margin: 0 }}>
+                <img src={sel.image.url} alt={`NASA VIIRS satellite image around this hotspot, ${sel.image.date}`} loading="lazy" />
+                <figcaption>NASA VIIRS true colour + heat detections (red) · {sel.image.date} · ~50 km across</figcaption>
+              </figure>
+            )}
             <div className="btn-row">
               <button className="btn btn-primary btn-sm" onClick={() => ctx.openPlace(sel.lat, sel.lon, 9000)}>⌖ Live view &amp; satellite image</button>
               <button className="btn btn-ghost btn-sm" onClick={() => { ctx.setDraftFor({ kind: 'hotspot', lat: sel.lat, lon: sel.lon, label: sel.admin?.district || sel.place.label }); ctx.setMode('command') }}>▲ Enforcement order</button>
@@ -288,8 +310,8 @@ export function DetectPanel({ ctx }: { ctx: Ctx }) {
               <button key={i} className={`row ${sel && sel.lat === h.lat && sel.lon === h.lon ? 'active' : ''}`} onClick={() => { setSel(h); ctx.onHotspot(h) }}>
                 <span className="rank-pill">{i + 1}</span>
                 <div className="row-main">
-                  <div className="row-t">{h.admin?.district || h.place.label}{h.admin?.country ? <span className="muted"> · {h.admin.state || h.admin.country}</span> : null}</div>
-                  <div className="row-s">{h.fires} detections · max {h.frp_max.toFixed(0)} MW · monitor {h.nearest_monitor_km != null ? `${h.nearest_monitor_km} km` : hs.official_coverage_known || (h.lat > 6 && h.lat < 37.5 && h.lon > 68 && h.lon < 97.5) ? '>100 km' : 'unknown'}{h.downwind.cities[0] ? ` · → ${h.downwind.cities[0].name}` : ''}</div>
+                  <div className="row-t">{h.confidence && <span className={`conf ${h.confidence}`} style={{ marginRight: 6 }}>{h.confidence[0].toUpperCase()}</span>}{h.admin?.district || h.place.label}{h.admin?.country ? <span className="muted"> · {h.admin.state || h.admin.country}</span> : null}</div>
+                  <div className="row-s">{h.fires} detections · max {h.frp_max.toFixed(0)} MW{h.site_pm25 != null ? ` · PM2.5 ${fmt(h.site_pm25, 0)}` : ''} · monitor {h.nearest_monitor_km != null ? `${h.nearest_monitor_km} km` : hs.official_coverage_known || (h.lat > 6 && h.lat < 37.5 && h.lon > 68 && h.lon < 97.5) ? '>100 km' : 'unknown'}{h.downwind.cities[0] ? ` · → ${h.downwind.cities[0].name}` : ''}</div>
                 </div>
               </button>
             ))}
@@ -405,6 +427,7 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
   const [err, setErr] = useState<string | null>(null)
   const [svOk, setSvOk] = useState(true)
   const [big, setBig] = useState<string | null>(null)
+  const [sv360, setSv360] = useState(false)
   const elapsed = useElapsed(!!pl && !d && !err)
   useEffect(() => {
     if (!pl) return
@@ -418,6 +441,9 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
   const f = d.forecast.now
   const name = d.place.locality || d.place.district || d.place.nearest_city
   const sv = d.imagery.streetview
+  const c3 = ctx.city3d && Math.abs(ctx.city3d.lat - d.lat) < 1e-6 && Math.abs(ctx.city3d.lon - d.lon) < 1e-6 ? ctx.city3d : null
+  const key = ctx.meta?.maps_browser_key
+  const svUrl = sv.available && key ? `https://www.google.com/maps/embed/v1/streetview?key=${key}&location=${sv.lat},${sv.lon}&heading=0&pitch=0&fov=90` : null
   return (
     <div className="stack">
       <div>
@@ -426,14 +452,34 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
         <div className="mono muted" style={{ fontSize: 11, marginTop: 4 }}>{d.lat.toFixed(5)}, {d.lon.toFixed(5)} · updated {ago(d.fetched_at)}</div>
       </div>
       <div className="btn-row">
-        <button className={`btn btn-sm ${ctx.layers.photoreal ? 'btn-primary' : 'btn-ghost'}`} onClick={() => {
-          const on = !ctx.layers.photoreal; ctx.setLayers({ ...ctx.layers, photoreal: on })
-          if (on) ctx.flyTo(d.lon, d.lat, 1100, -32, 20)
-        }}>◳ {ctx.layers.photoreal ? '3D city on' : '3D city view'}</button>
+        <button className={`btn btn-sm ${c3 ? 'btn-primary' : 'btn-ghost'}`} onClick={() => (c3 ? ctx.exit3D() : ctx.enter3D(d.lat, d.lon, { intel: d, label: name }))}>◳ {c3 ? 'Exit 3D' : '3D city'}</button>
+        {sv.available && key && <button className="btn btn-ghost btn-sm" onClick={() => setSv360(true)}>◉ Street View 360°</button>}
         <button className="btn btn-ghost btn-sm" onClick={() => ctx.track(d.lon, d.lat, name)}>⌖ Track</button>
         <button className="btn btn-ghost btn-sm" onClick={() => ctx.flyTo(d.lon, d.lat, 60000, -60)}>Zoom out</button>
         <button className="btn btn-ghost btn-sm" onClick={() => { ctx.setPick({ lat: d.lat, lon: d.lon }); ctx.setMode('citizen') }}>✦ Report here</button>
       </div>
+      {c3 && (
+        <section className="card city3d">
+          <div className="sec-h"><h3>3D city</h3><span className="muted">{c3.mode === 'model' ? 'OpenStreetMap building model' : 'Google Photorealistic 3D'}</span></div>
+          <div className="seg wide">
+            <button className={c3.mode === 'model' ? 'on' : ''} onClick={() => ctx.enter3D(d.lat, d.lon, { intel: d, label: name, mode: 'model' })}>Building model</button>
+            <button className={c3.mode === 'photoreal' ? 'on' : ''} onClick={() => ctx.enter3D(d.lat, d.lon, { intel: d, label: name, mode: 'photoreal' })}>Google photoreal</button>
+          </div>
+          {c3.mode === 'model' && (c3.loading ? <div className="muted" style={{ fontSize: 13 }}>Loading building footprints from OpenStreetMap…</div>
+            : c3.err ? <div className="err">{c3.err}</div>
+            : c3.b && <div className="fine" style={{ margin: 0 }}>{fmt(c3.b.count)} buildings within {c3.b.radius_m} m · {Math.round(c3.b.mapped_height_share * 100)}% have mapped heights, the rest use typical heights for their type · {c3.b.source}</div>)}
+          {c3.mode === 'photoreal' && <div className="fine" style={{ margin: 0 }}>Google's photogrammetry mesh. Across most of India it is still flat imagery; switch to the building model there.</div>}
+          {c3.vis_km != null && c3.pm25 != null && (
+            <div className="vis" style={{ marginTop: 10 }}>
+              <b className="display">~{c3.vis_km >= 10 ? Math.round(c3.vis_km) : c3.vis_km.toFixed(1)} km</b>
+              <span className="muted" style={{ fontSize: 13 }}>estimated visibility: the haze you see is computed from PM2.5 {fmt(c3.pm25, 0)} µg/m³ at {fmt(c3.rh, 0)}% humidity</span>
+            </div>
+          )}
+          <label className="layer-toggle" style={{ marginTop: 6 }}>
+            <input type="checkbox" checked={c3.haze} onChange={(e) => ctx.setCity3d((c) => (c ? { ...c, haze: e.target.checked } : c))} /> Show the air (haze from measured particles)
+          </label>
+        </section>
+      )}
       <section className="card live">
         <div className="sec-h"><h3>Right now · measured</h3><span className="muted">Google Air Quality</span></div>
         {local || uaqi ? (
@@ -468,7 +514,13 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
           ))}
         </div>
       </section>
-      {sv.available && svOk && (
+      {sv.available && (svUrl ? (
+        <section>
+          <div className="sec-h"><h3>Street level · 360°</h3><button className="btn btn-ghost btn-sm" onClick={() => setSv360(true)}>⤢ Full screen</button></div>
+          <iframe className="sv-frame" src={svUrl} title="Google Street View" loading="lazy" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
+          <p className="fine">Google Street View nearest to this point · captured {sv.date} (not live) · drag to look around.</p>
+        </section>
+      ) : svOk && (
         <section>
           <div className="sec-h"><h3>Street level</h3><span className="muted">Google Street View · {sv.date}</span></div>
           <figure className="shot wide" onClick={() => setBig(`/api/streetview?lat=${sv.lat}&lon=${sv.lon}`)}>
@@ -476,7 +528,7 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
             <figcaption>Nearest imagery · captured {sv.date} (not live)</figcaption>
           </figure>
         </section>
-      )}
+      ))}
       {d.fires.nearest.length > 0 && (
         <section>
           <div className="sec-h"><h3>Nearest heat detections</h3><span className="muted">NASA FIRMS, 24 h</span></div>
@@ -495,6 +547,12 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
       }}>▲ Draft alert for this place</button>
       <p className="fine">Authority: {d.authority}. Every number above carries its source; nothing is estimated unless labelled forecast.</p>
       {big && <div className="lightbox" onClick={() => setBig(null)}><img src={big} alt="" /></div>}
+      {sv360 && svUrl && (
+        <div className="sv-modal" onClick={() => setSv360(false)}>
+          <button className="x" aria-label="Close" onClick={() => setSv360(false)}>×</button>
+          <iframe src={svUrl} title="Google Street View 360" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
     </div>
   )
 }
@@ -844,18 +902,26 @@ export function CommonsPanel({ ctx }: { ctx: Ctx }) {
   const [dp, setDp] = useState(0)
   const [busy, setBusy] = useState(false)
   useEffect(() => { ctx.flyTo(40, 20, 2.1e7, -90) }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  if (!c) return <Loading lines={6} label="Loading the federated Model Commons…" />
+  if (!c) return <Loading lines={6} label="Loading the forecast accuracy report…" />
   const s = c.summary
   const groups = new Map<string, typeof c.nodes>()
   for (const n of c.nodes) { const k = n.federation ?? 'Global'; groups.set(k, [...(groups.get(k) ?? []), n]) }
   return (
     <div className="stack">
-      <p className="lede">Global forecasts miss local reality — and the error is different in every region. Each state or country trains on its own ground truth and shares <b>only model weights</b>. Regions federate; every node personalises.</p>
+      <p className="lede"><b>Why trust our forecasts?</b> Global air-quality models (like Europe's CAMS) are good but miss local reality: they run too high in some places and too low in others. Albedo-Watch corrects them with local ground measurements, <b>without anyone handing over their raw data</b>.</p>
+      <div className="explain card">
+        <ol>
+          <li><b>Each state or country learns locally.</b> It compares the global forecast with its own monitors and learns a small correction.</li>
+          <li><b>Only the lessons are shared.</b> Nodes send model weights (a few KB), never their measurements. This is <i>federated learning</i>.</li>
+          <li><b>Neighbours pool what they learn.</b> Regions such as the Indian states, South Asia or Europe average their corrections, so a place with no monitors still gets a better forecast.</li>
+        </ol>
+        <div className="fine" style={{ marginTop: 6 }}>Tested on the last 18 hours, which the models never saw. The map shows each node linked to its regional federation.</div>
+      </div>
       <div className="stats-2">
-        <Stat value={`−${s.improvement_pct}%`} label="forecast error vs the global model (federated + personalised)" tone="var(--albedo)" />
-        <Stat value={`−${s.zero_data_improvement_pct}%`} label="for a node that shares no data at all (borrows its federation)" tone="var(--wind)" />
+        <Stat value={`−${s.improvement_pct}%`} label="less forecast error than the raw global model" tone="var(--albedo)" />
+        <Stat value={`−${s.zero_data_improvement_pct}%`} label="less error even for a place with no monitors of its own" tone="var(--wind)" />
         <Stat value={`${s.nodes}`} label={`nodes in ${Object.keys(s.federations ?? {}).length || 1} regional federations`} />
-        <Stat value={`${fmt(s.raw_bytes_kept_local / 1024, 0)} KB`} label={`raw data never leaves its node · ${fmt(s.bytes_shared / 1024, 0)} KB of weights shared`} />
+        <Stat value={`${fmt(s.raw_bytes_kept_local / 1024, 0)} KB`} label={`of measurements stayed where they were collected · only ${fmt(s.bytes_shared / 1024, 0)} KB of model weights moved`} />
       </div>
       <section>
         <div className="sec-h"><h3>Mean abs. error, PM2.5 (µg/m³)</h3><span className="muted">held-out 18 h · lower is better</span></div>
