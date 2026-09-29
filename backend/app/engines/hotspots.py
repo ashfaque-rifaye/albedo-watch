@@ -204,7 +204,7 @@ async def find(scope: str = "world", limit: int = 20) -> dict:
             _geo_cache[key] = await google.reverse_geocode(h["lat"], h["lon"])
         h["admin"] = _geo_cache[key]
         # The India view is India only: the bounding box also covers neighbours.
-        country = h["admin"].get("country") or h["place"].get("country")
+        country = h["admin"].get("country") or (h["place"].get("country") if h["place"].get("km", 999) < 150 else None)
         if scope == "india" and country != "IN":
             continue
         h["why"] = _why(h)
