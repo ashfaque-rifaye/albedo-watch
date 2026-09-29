@@ -9,3 +9,6 @@ dist/
 backend/static/
 submission/*.mp4
 frontend/public/cesium/
+submission/**/*.mp4
+submission/**/*.webm
+submission/**/*.wav
