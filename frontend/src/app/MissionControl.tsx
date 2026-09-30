@@ -99,6 +99,11 @@ export type Ctx = {
   locateMe: () => void
   clearHub: () => void
   track: (lon: number, lat: number, label: string) => void
+  /** Accuracy view: the regional federation shown on the globe ('All' = every federation) */
+  fed: string
+  setFed: (f: string) => void
+  netBusy: boolean
+  setNetBusy: (b: boolean) => void
 }
 
 const RANGE = { world: 1.8e7, city: 9e4, street: 2800 }
@@ -122,6 +127,8 @@ export default function MissionControl() {
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [corridors, setCorridors] = useState<Corridor[]>([])
   const [commons, setCommons] = useState<Commons | null>(null)
+  const [fed, setFed] = useState('India')
+  const [netBusy, setNetBusy] = useState(false)
   const [events, setEvents] = useState<LiveEvent[]>([])
   const [frames, setFrames] = useState<{ h: number; t: number; naqi: Record<string, number | null>; level: Record<string, number> }[]>([])
   const [frameIdx, setFrameIdx] = useState<number | null>(null)
@@ -210,7 +217,10 @@ export default function MissionControl() {
   // saved hub: refresh its live readings
   useEffect(() => { if (hub && !hub.intel) api.place(hub.lat, hub.lon).then((i) => setHub({ lat: hub.lat, lon: hub.lon, intel: i })).catch(() => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { if (mode === 'forecast') setLayers((l) => ({ ...l, corridors: true })) }, [mode])
+  useEffect(() => {
+    setLayers((l) => (l.corridors === (mode === 'forecast') ? l : { ...l, corridors: mode === 'forecast' }))
+    if (mode === 'commons') setTrackT(null)
+  }, [mode])
   useEffect(() => {
     if (mode !== 'place') setCity3dRaw(null)
     if (mode !== 'trace') setAttribution(null)
@@ -374,12 +384,22 @@ export default function MissionControl() {
     refreshReports, refreshAlerts, setCommons, reloadPulse, selectedReport, setSelectedReport, onHotspot, draftFor, setDraftFor,
     place, openPlace, layers, setLayers, country, setCountry, countries, hub, locating, locateMe, clearHub, track,
     city3d, enter3D, exit3D, setCity3d, protectCity, setSites, openAlertId, setOpenAlertId, runActions,
+    fed, setFed, netBusy, setNetBusy,
   }
 
   const frame = replay && frameIdx != null ? frames[frameIdx] : null
   const nowIdx = frames.findIndex((f) => f.h === 0)
   const activeMode = mode === 'place' ? { label: 'Place', verb: 'Live at this spot', icon: '⌖' } : MODES.find((m) => m.id === mode)!
-  const network = mode === 'commons' && commons ? commons.nodes.map((n) => ({ lat: n.lat, lon: n.lon, name: n.name, fed: n.federation })) : null
+  // Accuracy shows one regional federation at a time, on a quiet globe: no smoke, wind, fires or city tags.
+  const network = useMemo(() => (mode === 'commons' && commons
+    ? commons.nodes.filter((n) => fed === 'All' || (n.federation ?? 'Global') === fed)
+      .map((n) => ({ lat: n.lat, lon: n.lon, name: n.name, fed: n.federation ?? 'Global',
+        gain: n.mae_cams > 0 ? Math.round((1 - n.mae_personalised / n.mae_cams) * 100) : null }))
+    : null), [mode, commons, fed])
+  const quiet = mode === 'commons'
+  const shownLayers: GlobeLayers = quiet
+    ? { ...layers, wind: false, fires: false, cities: false, hotspots: false, reports: false, sensors: false, corridors: false, photoreal: false }
+    : city3d?.mode === 'photoreal' ? { ...layers, photoreal: true } : layers
   const shownEvents = country ? events.filter((e) => !e.country || e.country === country) : events
   const cycleSheet = () => setSheet((s) => (mobile ? (s === 'peek' ? 'half' : s === 'half' ? 'full' : 'peek') : s === 'open' ? 'min' : 'open'))
 
@@ -392,9 +412,9 @@ export default function MissionControl() {
           citizen={sensors?.citizen ?? []} stations={sensors?.stations ?? []}
           hotspots={mode === 'detect' || tour ? hotspots?.hotspots ?? [] : []} reports={reports} corridors={corridors}
           trajectories={attribution?.paths ?? null} clusters={attribution?.clusters ?? []} plume={plume}
-          network={network} selectedCity={selectedCity} selectedReport={selectedReport}
+          network={network} netBusy={netBusy} selectedCity={selectedCity} selectedReport={selectedReport}
           pick={pick} hub={hub ? { lat: hub.lat, lon: hub.lon } : null} theme={theme}
-          layers={city3d?.mode === 'photoreal' ? { ...layers, photoreal: true } : layers}
+          layers={shownLayers}
           buildings={city3d?.mode === 'model' ? city3d.b : null} buildingTint={city3d?.tint ?? null}
           haze={city3d?.haze ? city3d.ext : null} ping={ping} sites={mode === 'protect' ? sites : null}
           lens={lens} hud={hud} autoPhotoreal={!mobile} track={trackT} flyTo={fly}

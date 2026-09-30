@@ -914,35 +914,103 @@ function AlertView({ ctx, a, onBack, onUpdate }: { ctx: Ctx; a: Alert; onBack: (
   )
 }
 
-/* ================================================================ COMMONS */
+/* ================================================================ ACCURACY (federated learning) */
 export function CommonsPanel({ ctx }: { ctx: Ctx }) {
   const c = ctx.commons
   const [dp, setDp] = useState(0)
-  const [busy, setBusy] = useState(false)
-  useEffect(() => { ctx.flyTo(40, 20, 2.1e7, -90) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const { fed, setFed, netBusy: busy } = ctx
+  const feds = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const n of c?.nodes ?? []) { const k = n.federation ?? 'Global'; m.set(k, (m.get(k) ?? 0) + 1) }
+    return [...m.entries()].filter(([, n]) => n > 1).sort((x, y) => (x[0] === 'India' ? -1 : y[0] === 'India' ? 1 : y[1] - x[1]))
+  }, [c])
+  const shown = useMemo(() => (c?.nodes ?? []).filter((n) => fed === 'All' || (n.federation ?? 'Global') === fed), [c, fed])
+  // open on the viewer's own federation (India first)
+  useEffect(() => {
+    const mine = ctx.country && ctx.country !== 'IN' ? c?.nodes.find((n) => n.state === ctx.country)?.federation : null
+    if (mine && feds.some(([k]) => k === mine)) setFed(mine)
+  }, [!!c]) // eslint-disable-line react-hooks/exhaustive-deps
+  // frame the federation on the globe
+  useEffect(() => {
+    if (!shown.length) return
+    if (fed === 'All') { ctx.flyTo(60, 18, 2.0e7, -90); return }
+    const lats = shown.map((n) => n.lat), lons = shown.map((n) => n.lon)
+    const span = Math.max(Math.max(...lats) - Math.min(...lats), Math.max(...lons) - Math.min(...lons))
+    ctx.flyTo((Math.min(...lons) + Math.max(...lons)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2,
+      Math.min(1.6e7, Math.max(2.4e6, span * 2.1e5 + 9e5)), -88)
+  }, [fed, shown.length]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!c) return <Loading lines={6} label="Loading the forecast accuracy report…" />
   const s = c.summary
-  const groups = new Map<string, typeof c.nodes>()
-  for (const n of c.nodes) { const k = n.federation ?? 'Global'; groups.set(k, [...(groups.get(k) ?? []), n]) }
+  const tot = shown.reduce((t, n) => t + n.samples, 0) || 1
+  const avg = (k: 'mae_cams' | 'mae_personalised' | 'mae_zero_data') => shown.reduce((t, n) => t + n[k] * n.samples, 0) / tot
+  const base = avg('mae_cams'), ours = avg('mae_personalised'), zero = avg('mae_zero_data')
+  const pct = (v: number) => (base > 0 ? Math.round((1 - v / base) * 100) : 0)
+  const signed = (v: number) => `${v >= 0 ? '−' : '+'}${Math.abs(v)}%`
+  const unit = fed === 'India' ? 'states' : fed === 'All' ? 'states and countries' : 'countries'
+  const weakest = [...shown].sort((x, y) => y.mae_personalised - x.mae_personalised).slice(0, 3)
+  const where = fed === 'All' ? 'worldwide' : fed === 'India' ? 'across India' : `in ${fed}`
   return (
     <div className="stack">
-      <p className="lede"><b>Why trust our forecasts?</b> Global air-quality models (like Europe's CAMS) are good but miss local reality: they run too high in some places and too low in others. Albedo-Watch corrects them with local ground measurements, <b>without anyone handing over their raw data</b>.</p>
-      <div className="explain card">
-        <ol>
-          <li><b>Each state or country learns locally.</b> It compares the global forecast with its own monitors and learns a small correction.</li>
-          <li><b>Only the lessons are shared.</b> Nodes send model weights (a few KB), never their measurements. This is <i>federated learning</i>.</li>
-          <li><b>Neighbours pool what they learn.</b> Regions such as the Indian states, South Asia or Europe average their corrections, so a place with no monitors still gets a better forecast.</li>
-        </ol>
-        <div className="fine" style={{ marginTop: 6 }}>Tested on the last 18 hours, which the models never saw. The map shows each node linked to its regional federation.</div>
-      </div>
+      <p className="lede"><b>How good are our forecasts, and where are they weakest?</b> Global air models miss local reality. Each state or country corrects them with its own monitors and shares only what it learned, never its data.</p>
+      <label className="slider">Region shown on the globe
+        <select className="select" value={fed} onChange={(e) => setFed(e.target.value)}>
+          {feds.map(([k, n]) => <option key={k} value={k}>{k} · {n} {k === 'India' ? 'states' : 'countries'}</option>)}
+          <option value="All">All regions · {c.nodes.length} nodes</option>
+        </select>
+      </label>
       <div className="stats-2">
-        <Stat value={`−${s.improvement_pct}%`} label="less forecast error than the raw global model" tone="var(--albedo)" />
-        <Stat value={`−${s.zero_data_improvement_pct}%`} label="less error even for a place with no monitors of its own" tone="var(--wind)" />
-        <Stat value={`${s.nodes}`} label={`nodes in ${Object.keys(s.federations ?? {}).length || 1} regional federations`} />
-        <Stat value={`${fmt(s.raw_bytes_kept_local / 1024, 0)} KB`} label={`of measurements stayed where they were collected · only ${fmt(s.bytes_shared / 1024, 0)} KB of model weights moved`} />
+        <Stat value={signed(pct(ours))} label={`forecast error ${where} vs the raw global model`} tone="var(--albedo)" />
+        <Stat value={signed(pct(zero))} label="even for a place with no monitors of its own" tone="var(--wind)" />
+        <Stat value={`${fmt(base, 1)} → ${fmt(ours, 1)}`} label="average PM2.5 error, µg/m³ (global model → ours)" />
+        <Stat value={`${shown.length}`} label={`${unit} pooling what they learn`} />
       </div>
+      <section className="card explain">
+        <div className="sec-h"><h3>What you can do here</h3></div>
+        <ol>
+          <li><b>Judge how far to trust a forecast.</b> Every dot is a {fed === 'India' ? 'state' : 'node'}. Green means our corrected forecast beats the global model there; ▼ is error removed, ▲ is error added, so you know where to rely on local monitors instead.</li>
+          <li><b>See where a new monitor pays off most.</b> The largest remaining error is in{' '}
+            {weakest.map((n, i) => <span key={n.state} style={{ whiteSpace: 'nowrap' }}><button className="linkish" onClick={() => ctx.flyTo(n.lon, n.lat, 9e5, -70)}>{n.name}</button>{i < weakest.length - 1 ? ', ' : '.'}</span>)}</li>
+          <li><b>Retrain with privacy.</b> Add noise so no node's data can be inferred, and see what it costs in accuracy.</li>
+        </ol>
+      </section>
       <section>
-        <div className="sec-h"><h3>Mean abs. error, PM2.5 (µg/m³)</h3><span className="muted">held-out 18 h · lower is better</span></div>
+        <div className="sec-h"><h3>{fed === 'All' ? 'Every node' : fed}</h3><span className="muted">error, µg/m³ · last 18 h, unseen in training</span></div>
+        <div className="acc-head"><span /> <span>Global</span><span>Ours</span><span>Change</span></div>
+        <div className="acc-list">
+          {[...shown].sort((x, y) => y.mae_cams - x.mae_cams).map((n) => {
+            const g = n.mae_cams > 0 ? Math.round((1 - n.mae_personalised / n.mae_cams) * 100) : 0
+            return (
+              <button key={n.state} className="acc-row" onClick={() => ctx.flyTo(n.lon, n.lat, 9e5, -70)} title={`${n.name} · ${n.authority}`}>
+                <span className="acc-name"><i style={{ background: g >= 3 ? '#4fd18b' : g > -3 ? '#f2c230' : '#f08a24' }} />{n.name}</span>
+                <span className="mono muted">{fmt(n.mae_cams, 1)}</span>
+                <span className="mono">{fmt(n.mae_personalised, 1)}</span>
+                <span className="mono" style={{ color: g >= 3 ? 'var(--good)' : g > -3 ? 'var(--ink-2)' : '#f08a24' }}>{signed(g)}</span>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+      <section className="card">
+        <div className="sec-h"><h3>Retrain the federations</h3><span className="muted">{s.rounds} rounds · {s.train_ms} ms last time</span></div>
+        <label className="slider">Privacy noise (differential privacy σ) <b className="mono">{dp.toFixed(2)}</b>
+          <input type="range" min={0} max={0.1} step={0.01} value={dp} onChange={(e) => setDp(+e.target.value)} />
+        </label>
+        <button className="btn btn-primary btn-sm" disabled={busy} onClick={async () => {
+          ctx.setNetBusy(true)
+          try { ctx.setCommons(await api.train(30, dp)); await ctx.reloadPulse() } finally { ctx.setNetBusy(false) }
+        }}>{busy ? `Training ${s.nodes} nodes — watch the weights move…` : '⬡ Run 30 rounds'}</button>
+        <div className="fine" style={{ marginTop: 6 }}>{fmt(s.raw_bytes_kept_local / 1024, 0)} KB of measurements stayed where they were collected; only {fmt(s.bytes_shared / 1024, 0)} KB of model weights moved.</div>
+      </section>
+      <details className="card more">
+        <summary>How it works, and the full test results</summary>
+        <div className="explain">
+          <ol>
+            <li><b>Each state or country learns locally.</b> It compares the global forecast with its own monitors and learns a small correction.</li>
+            <li><b>Only the lessons are shared.</b> Nodes send model weights (a few KB), never their measurements. This is <i>federated learning</i>.</li>
+            <li><b>Neighbours pool what they learn.</b> The lines on the globe join each node to its regional pool, so a place with no monitors still gets a better forecast.</li>
+          </ol>
+        </div>
+        <div className="sec-h" style={{ marginTop: 10 }}><h3>All {s.nodes} nodes: mean error, PM2.5 (µg/m³)</h3><span className="muted">lower is better</span></div>
         <HBars rows={[
           { label: 'Global model (CAMS)', value: s.mae_cams },
           ...(s.mae_global != null ? [{ label: 'One planet-wide model', value: s.mae_global, note: 'biases differ by region' }] : []),
@@ -951,44 +1019,15 @@ export function CommonsPanel({ ctx }: { ctx: Ctx }) {
           { label: 'Federated + personalised', value: s.mae_personalised, accent: true },
           { label: 'Node with zero data', value: s.mae_zero_data, accent: true },
         ]} />
-      </section>
-      <section>
-        <div className="sec-h"><h3>Convergence</h3><span className="muted">{s.rounds} FedAvg rounds · {s.train_ms} ms</span></div>
+        <div className="sec-h" style={{ marginTop: 10 }}><h3>Convergence</h3><span className="muted">{s.rounds} FedAvg rounds</span></div>
         <RoundsChart rounds={c.rounds} baseline={s.mae_cams} />
-      </section>
-      <section className="card">
-        <div className="sec-h"><h3>Retrain the federations</h3></div>
-        <label className="slider">Differential-privacy noise σ <b className="mono">{dp.toFixed(2)}</b>
-          <input type="range" min={0} max={0.1} step={0.01} value={dp} onChange={(e) => setDp(+e.target.value)} />
-        </label>
-        <button className="btn btn-primary btn-sm" disabled={busy} onClick={async () => { setBusy(true); try { ctx.setCommons(await api.train(30, dp)); await ctx.reloadPulse() } finally { setBusy(false) } }}>{busy ? `Training ${s.nodes} nodes…` : '⬡ Run 30 rounds'}</button>
-      </section>
-      <section>
-        <div className="sec-h"><h3>Federations</h3><span className="muted">global-model bias → corrected error</span></div>
-        {[...groups.entries()].sort((a, b) => b[1].length - a[1].length).map(([g, nodes]) => (
-          <div key={g} className="fed-group">
-            <div className="eyebrow" style={{ margin: '10px 0 4px' }}>{g} · {nodes.length}</div>
-            <div className="nodes">
-              {[...nodes].sort((a, b) => b.mae_cams - a.mae_cams).map((n) => (
-                <div key={n.state} className="node">
-                  <span>{n.name} <span className="muted">({n.authority})</span></span>
-                  <span className="mono" style={{ color: n.bias_cams > 0 ? '#f08a24' : '#6fe3ff' }}>{n.bias_cams > 0 ? '+' : ''}{n.bias_cams}</span>
-                  <span className="mono muted">{n.mae_cams}</span>
-                  <span className="mono" style={{ color: n.mae_personalised < n.mae_cams ? 'var(--good)' : 'var(--ink-2)' }}>{n.mae_personalised}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </section>
-      <section className="card">
-        <div className="sec-h"><h3>Open by design — a Digital Public Good</h3></div>
+        <div className="sec-h" style={{ marginTop: 10 }}><h3>Open by design: a digital public good</h3></div>
         <div className="links">
           <a href="/api/interop/schema" target="_blank" rel="noreferrer">Open Air Event Protocol (JSON Schema) ↗</a>
-          <a href="/api/interop/events.geojson" target="_blank" rel="noreferrer">Live OAEP event feed (GeoJSON) ↗</a>
+          <a href="/api/interop/events.geojson" target="_blank" rel="noreferrer">Live event feed (GeoJSON) ↗</a>
           <a href="/api/commons" target="_blank" rel="noreferrer">Model card + weights (CC-BY-4.0) ↗</a>
         </div>
-      </section>
+      </details>
     </div>
   )
 }

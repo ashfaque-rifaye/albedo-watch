@@ -16,7 +16,8 @@ export type Telemetry = { lat: number | null; lon: number | null; alt: number; h
 export type FireBin = [number, number, number, number, number]   // lat, lon, count, frpSum, frpMax
 export type FireDet = [number, number, number, number]            // lat, lon, frp, ageH
 export type SensorPt = [number, number, number, number]           // lat, lon, pm25, ageMin
-export type NetNode = { lat: number; lon: number; name: string; fed?: string }
+/** A federated-learning node; gain = % less forecast error than the raw global model (negative = worse) */
+export type NetNode = { lat: number; lon: number; name: string; fed?: string; gain?: number | null }
 
 export type GlobeProps = {
   cities: City[]
@@ -33,6 +34,8 @@ export type GlobeProps = {
   clusters: Cluster[]
   plume: [number, number, number][][] | null
   network: NetNode[] | null
+  /** true while the federations are retraining: only then do weights visibly travel along the links */
+  netBusy?: boolean
   selectedCity: string | null
   selectedReport: string | null
   pick: { lat: number; lon: number; h?: number } | null
@@ -179,6 +182,7 @@ export default function Globe(p: GlobeProps) {
   const sampler = useRef<ReturnType<typeof makeSampler>>(null)
   const particles = useRef<Particle[]>([])
   const arcs = useRef<Cesium.Cartesian3[][]>([])
+  const netHubs = useRef<{ lat: number; lon: number; name: string; n: number }[]>([])
   const tagOrder = useRef<City[]>([])
   const idle = useRef(true)
   const orbit = useRef<{ center: Cesium.Cartesian3; heading: number; pitch: number; range: number } | null>(null)
@@ -604,20 +608,22 @@ export default function Globe(p: GlobeProps) {
   useEffect(() => {
     const a = coll.current.arcs as Cesium.PolylineCollection
     if (!a) return
-    a.removeAll(); arcs.current = []
+    a.removeAll(); arcs.current = []; netHubs.current = []
     const nodes = p.network ?? []
     const hubs = new Map<string, { lat: number; lon: number; n: number }>()
     for (const n of nodes) {
-      const k = n.fed ?? 'global', h = hubs.get(k) ?? { lat: 0, lon: 0, n: 0 }
+      const k = n.fed ?? 'Global', h = hubs.get(k) ?? { lat: 0, lon: 0, n: 0 }
       h.lat += n.lat; h.lon += n.lon; h.n++; hubs.set(k, h)
     }
+    for (const [name, h] of hubs) if (h.n > 1) netHubs.current.push({ lat: h.lat / h.n, lon: h.lon / h.n, name, n: h.n })
     for (const n of nodes) {
-      const h = hubs.get(n.fed ?? 'global')!
+      const h = hubs.get(n.fed ?? 'Global')!
       const hub = { lat: h.lat / h.n, lon: h.lon / h.n }
-      if (Math.hypot(hub.lat - n.lat, hub.lon - n.lon) < 0.3) continue
+      if (h.n < 2 || Math.hypot(hub.lat - n.lat, hub.lon - n.lon) < 0.3) continue
       const pts = arc(n, hub)
       arcs.current.push(pts)
-      a.add({ positions: pts, width: 2.2, material: Cesium.Material.fromType('PolylineGlow', { color: col('#6fe3ff', 0.55), glowPower: 0.22 }) })
+      // thin, quiet, static links: these are data relationships, not smoke paths
+      a.add({ positions: pts, width: 1.3, material: Cesium.Material.fromType('Color', { color: col('#8fdcf0', 0.34) }) })
     }
   }, [p.network, ready])
 
@@ -760,13 +766,46 @@ export default function Globe(p: GlobeProps) {
     }
     comet(S.trajectories, '255,179,92', false)
     comet(S.plume, '241,230,200', true)
-    if (arcs.current.length) {
-      const ph = (t / 2200) % 1
-      g.fillStyle = 'rgba(255,255,255,0.95)'
-      for (const pts of arcs.current) {
-        const a = projC(pts[Math.floor(ph * (pts.length - 1))])
-        if (a) { g.beginPath(); g.arc(a[0], a[1], 2.6, 0, Math.PI * 2); g.fill() }
+    if (S.network?.length) {
+      // Accuracy view: each node is one state or country; its colour says whether the corrected
+      // forecast beats the raw global model there. Weights only travel while a retrain is running.
+      if (S.netBusy) {
+        const ph = (t / 1600) % 1
+        g.fillStyle = 'rgba(255,255,255,0.95)'
+        for (const pts of arcs.current) {
+          const a = projC(pts[Math.floor(ph * (pts.length - 1))])
+          if (a) { g.beginPath(); g.arc(a[0], a[1], 2.4, 0, Math.PI * 2); g.fill() }
+        }
       }
+      const placed: [number, number, number, number][] = []
+      const chip = (x: number, y: number, text: string, dot: string | null, strong: boolean) => {
+        const tw = g.measureText(text).width + (dot ? 20 : 14), th = 18
+        if (placed.some(([px, py, pw, ph2]) => x < px + pw + 3 && px < x + tw + 3 && y < py + ph2 + 2 && py < y + th + 2)) return
+        placed.push([x, y, tw, th])
+        g.beginPath(); g.roundRect(x, y, tw, th, 9); g.fillStyle = strong ? 'rgba(10,16,24,0.92)' : 'rgba(8,12,18,0.7)'; g.fill()
+        g.strokeStyle = strong ? 'rgba(143,220,240,0.75)' : 'rgba(255,255,255,0.16)'; g.lineWidth = 1; g.stroke()
+        if (dot) { g.beginPath(); g.arc(x + 8, y + th / 2, 3, 0, Math.PI * 2); g.fillStyle = dot; g.fill() }
+        g.fillStyle = 'rgba(240,245,250,0.96)'; g.fillText(text, x + (dot ? 14 : 7), y + th / 2 + 0.5)
+      }
+      g.textBaseline = 'middle'
+      g.font = '600 11px Inter, system-ui, sans-serif'
+      for (const hb of netHubs.current) {
+        const a = proj(hb.lon, hb.lat); if (!a) continue
+        g.beginPath()
+        for (let k = 0; k < 6; k++) { const an = (Math.PI / 3) * k + Math.PI / 6; g[k ? 'lineTo' : 'moveTo'](a[0] + Math.cos(an) * 8, a[1] + Math.sin(an) * 8) }
+        g.closePath(); g.fillStyle = 'rgba(10,16,24,0.9)'; g.fill(); g.strokeStyle = 'rgba(143,220,240,0.95)'; g.lineWidth = 1.6; g.stroke()
+        chip(a[0] + 12, a[1] - 9, netHubs.current.length > 1 ? `${hb.name} · ${hb.n}` : `${hb.name} pool · ${hb.n} nodes share lessons here`, null, true)
+      }
+      g.font = '600 10.5px Inter, system-ui, sans-serif'
+      const few = S.network.length <= 24 || hgt < 6e6
+      for (const n of S.network) {
+        const a = proj(n.lon, n.lat); if (!a) continue
+        const color = n.gain == null ? '#9aa6b5' : n.gain >= 3 ? '#4fd18b' : n.gain > -3 ? '#f2c230' : '#f08a24'
+        g.beginPath(); g.arc(a[0], a[1], 5, 0, Math.PI * 2); g.fillStyle = color; g.fill()
+        g.strokeStyle = 'rgba(8,12,18,0.85)'; g.lineWidth = 1.5; g.stroke()
+        if (few) chip(a[0] + 8, a[1] - 20, n.gain == null ? n.name : `${n.name}  ${n.gain >= 0 ? '▼' : '▲'}${Math.abs(n.gain)}%`, color, false)
+      }
+      g.textBaseline = 'alphabetic'
     }
 
     if (S.hud && hgt < 8e6) {
