@@ -490,3 +490,7 @@ textarea.input { resize: vertical; }
 .explain { font-size: 13px; line-height: 1.5; color: var(--ink-2, #c9d2de); }
 .explain ol { margin: 6px 0 0; padding-left: 18px; }
 .explain li { margin: 3px 0; }
+
+/* ---------------- crash containment ---------------- */
+.err-boundary { display: grid; gap: 6px; justify-items: start; padding: 14px; border-radius: 14px; border: 1px solid rgba(240,138,36,.4);
+  background: rgba(240,138,36,.08); font-size: 13.5px; }

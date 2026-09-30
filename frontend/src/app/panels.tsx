@@ -985,8 +985,12 @@ export function AskDrawer({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
   const [listening, setListening] = useState(false)
   const [voiceLang, setVoiceLang] = useState('en-IN')
   const srRef = useRef<SR | null>(null)
-  const end = useRef<HTMLDivElement>(null)
-  useEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [msgs, busy])
+  const body = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = body.current  // scroll the chat only, never the page behind it
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [msgs, busy])
+  useEffect(() => () => { srRef.current?.stop() }, [])
   const SRClass = (window as unknown as { SpeechRecognition?: new () => SR; webkitSpeechRecognition?: new () => SR }).SpeechRecognition
     ?? (window as unknown as { webkitSpeechRecognition?: new () => SR }).webkitSpeechRecognition
   async function send(text: string) {
@@ -1010,7 +1014,7 @@ export function AskDrawer({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
         <div><div className="eyebrow">✦ Ask Albedo</div><div className="muted" style={{ fontSize: 12 }}>Any language · type or speak</div></div>
         <button className="x" onClick={onClose} aria-label="Close">×</button>
       </div>
-      <div className="ask-body scroll-y">
+      <div className="ask-body scroll-y" ref={body}>
         {!msgs.length && <div className="samples">{samples.map((s) => <button key={s} onClick={() => send(s)}>{s}</button>)}</div>}
         {msgs.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
@@ -1024,7 +1028,6 @@ export function AskDrawer({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
           </div>
         ))}
         {busy && <div className="msg a"><div className="typing"><i /><i /><i /></div></div>}
-        <div ref={end} />
       </div>
       <form className="ask-in" onSubmit={(e) => { e.preventDefault(); send(q) }}>
         {SRClass && (<>

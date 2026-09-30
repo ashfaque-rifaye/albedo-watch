@@ -3,6 +3,7 @@ import type { Alert, Attribution, BuildingSet, City, Commons, Corridor, FireFeed
 import { api } from '../lib/api'
 import { fmt, istTime } from '../lib/format'
 import { Logo, Wordmark } from '../components/Logo'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import type { FlyTarget, GlobeLayers, Lens, Theme, Track } from './Globe'
 import { Coach, EventFeed, Hud, Legend, TourCaption } from './hud'
 import { AskDrawer, CitizenPanel, CommandPanel, CommonsPanel, DetectPanel, ForecastPanel, PlacePanel, PulsePanel, TracePanel } from './panels'
@@ -429,14 +430,16 @@ export default function MissionControl() {
         <div className="mc-panel-body scroll-y">
           {error && <div className="err">{error} <button className="btn btn-ghost btn-sm" onClick={() => { setError(null); reloadPulse() }}>OK</button></div>}
           {pulse?.stale && mode === 'pulse' && <div className="note">Showing the last saved snapshot while live data refreshes…</div>}
-          {mode === 'pulse' && <PulsePanel ctx={ctx} />}
-          {mode === 'detect' && <DetectPanel ctx={ctx} />}
-          {mode === 'trace' && <TracePanel ctx={ctx} />}
-          {mode === 'citizen' && <CitizenPanel ctx={ctx} />}
-          {mode === 'forecast' && <ForecastPanel ctx={ctx} />}
-          {mode === 'command' && <CommandPanel ctx={ctx} />}
-          {mode === 'commons' && <CommonsPanel ctx={ctx} />}
-          {mode === 'place' && <PlacePanel ctx={ctx} />}
+          <ErrorBoundary label={activeMode.label} key={mode}>
+            {mode === 'pulse' && <PulsePanel ctx={ctx} />}
+            {mode === 'detect' && <DetectPanel ctx={ctx} />}
+            {mode === 'trace' && <TracePanel ctx={ctx} />}
+            {mode === 'citizen' && <CitizenPanel ctx={ctx} />}
+            {mode === 'forecast' && <ForecastPanel ctx={ctx} />}
+            {mode === 'command' && <CommandPanel ctx={ctx} />}
+            {mode === 'commons' && <CommonsPanel ctx={ctx} />}
+            {mode === 'place' && <PlacePanel ctx={ctx} />}
+          </ErrorBoundary>
         </div>
       </aside>
 
@@ -497,7 +500,7 @@ export default function MissionControl() {
       {tour && <TourCaption step={tour.step} total={tour.steps.length} title={tour.steps[tour.step].title} text={tour.steps[tour.step].text} onStop={stopTour} />}
       {mobile && legendOpen && <div className="legend-sheet glass fade-up"><Legend onClose={() => setLegendOpen(false)} /></div>}
       {pickMode && <div className="pick-hint glass">Tap the globe where you saw pollution</div>}
-      {askOpen && <AskDrawer ctx={ctx} onClose={() => setAskOpen(false)} />}
+      {askOpen && <ErrorBoundary label="Ask" onReset={() => setAskOpen(false)}><AskDrawer ctx={ctx} onClose={() => setAskOpen(false)} /></ErrorBoundary>}
     </div>
   )
 }
