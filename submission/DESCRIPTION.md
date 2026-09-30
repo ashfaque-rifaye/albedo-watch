@@ -11,7 +11,7 @@ Albedo-Watch is live air intelligence on a 3D Earth, built on Gemini and Google 
 - Live prototype: https://albedo-watch-621000818329.asia-south1.run.app (Mission Control: /app)
 - Source code: https://github.com/ashfaque-rifaye/albedo-watch (private — grant judges access)
 - Demo video: `Albedo-Watch-Demo.mp4` (4 min 51 s) — upload to YouTube (unlisted) or Drive and paste the link
-- Pitch deck: https://claude.ai/artifact/4qgHPUeC5VQkGjp9Zghrzc (export to PDF or PPTX from the deck's menu)
+- Executive brief (12 slides): https://claude.ai/artifact/4qgHPUeC5VQkGjp9Zghrzc (export to PDF or PPTX from the deck's menu)
 
 ## One-liner
 

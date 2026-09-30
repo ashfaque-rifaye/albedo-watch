@@ -32,7 +32,7 @@ States and countries improve each other's forecasts through **regional federated
 | **Citizen** | Photo / voice note / WhatsApp voice file in any language → Gemini classification, authenticity check, satellite corroboration, jurisdiction routing, reply in the citizen's language with voice |
 | **Command** | GRAP-aligned (India) or WHO-referenced (elsewhere) action orders; pick languages (English + local, up to 4); NASA image evidence read by Gemini; SMS + TTS voice; approve → dispatch → acknowledge → resolve ledger |
 | **Protect** | Schools, colleges, hospitals and clinics in a city or a smoke plume (OpenStreetMap), hour-by-hour safe outdoor windows, one-click advisories to principals and hospital administrators |
-| **Accuracy** | Regional federated learning across 48 nodes (Indian states + countries) with per-node personalisation and optional differential privacy, explained in plain language |
+| **Accuracy** | How far to trust the forecast, state by state: regional federated learning (Indian states + countries) with per-node personalisation and optional differential privacy. One region at a time on a quiet globe, each state labelled with its change in error, and the places where a new monitor would pay off most |
 | **Albedo Copilot** | A Gemini agent with 9 tools over our engines (find place, city forecast, worst air, hotspots, source trace, sensitive sites, live air at a point, response simulation, draft order). Each tool call also moves the map; a human approves any order |
 | **My Air Plan** | Pick a health profile (asthma, child, elderly, outdoor work…) for personal safe hours at your hub, and a Web Push alert before unhealthy air arrives (Cloud Scheduler checks every 2 h) |
 | **Live reports** | Real-time picture notifications pinned on the globe: citizen photo reports, today's news photos about smoke and smog (GDELT), and NASA satellite views of new fires |
@@ -41,11 +41,11 @@ States and countries improve each other's forecasts through **regional federated
 ## Honest numbers (live — recomputed every few hours)
 
 - **NASA heat detections**: ~47,000 per 24 h worldwide after merging the two VIIRS satellites' duplicate sightings (~93,000 raw). Median intensity ~5 MW: most are small crop or vegetation fires, some are gas flares. The UI says so.
-- **Federated learning** (snapshot 28 Sep 2026, PM2.5 MAE on held-out hours): global CAMS 15.6 µg/m³ · one planet-wide model 11.8 · regional federations 10.5 · each node alone 8.7 · **federated + personalised 8.1 (−48%)** · a node with zero data, served by its federation 12.5 (−20%). Lesson we built in: bias is regional, so federations are regional.
+- **Federated learning** (snapshot 30 Sep 2026, PM2.5 MAE on the last 18 h, unseen in training): across India, global CAMS 19.7 µg/m³ → **federated + personalised 11.3 (−42%)**; a state with zero data, served by its federation, 14.7 (−25%). 13 of 20 states improve and the app flags the 7 that do not. Worldwide (47 nodes): CAMS 15.6 → regional federations 11.0 (−29%). The numbers move with each retrain; an earlier snapshot (28 Sep) was −48%. Lesson we built in: bias is regional, so federations are regional.
 
 ## Google AI & Cloud — doing real work
 
-- **Gemini 3.7 Flash** (AI Studio): the **Albedo Copilot agent** (function calling over 9 tools, UI actions per step), multimodal evidence analysis (image + audio), authenticity checks, source narratives, orders and advisories drafted natively in 27 languages. Model cascade 3.7 → 2.5 → 3.5 Flash with failover, and the agent returns the facts it already gathered if a model stalls.
+- **Gemini 3.7 Flash** (AI Studio): the **Albedo Copilot agent** (function calling over 9 tools, UI actions per step), multimodal evidence analysis (image + audio), authenticity checks, source narratives, orders and advisories drafted natively in 18 Indian languages (85 languages across the 104 countries). Model cascade 3.7 → 2.5 → 3.5 Flash with failover, and the agent returns the facts it already gathered if a model stalls.
 - **Google Flow (Veo 3.1)**: the landing-page films and the demo's cutaways (labelled as AI-generated).
 - **Gemini 3.8 Flash TTS**: voice advisories and citizen replies.
 - **Google Maps Platform**: Air Quality API history (station-fused ground truth for federated training), Geocoding (jurisdiction routing, country filter).
