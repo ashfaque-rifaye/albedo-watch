@@ -29,8 +29,10 @@ Work like an analyst on duty:
 3. Answer in the user's language and script. Be concise: a short paragraph or a few bullets with concrete numbers,
    local times and places. Mention the evidence (CAMS forecast corrected by the federated model, Google Air Quality,
    NASA FIRMS, OpenAQ monitors, OpenStreetMap).
-4. When asked to act (order, notice, advisory, alert), call draft_order. Say that a human officer must approve it
+4. When asked to act (order, notice, advisory, alert), call draft_order — with audience "schools" when the user means
+   principals or schools, "hospitals" for hospitals — and the requested languages. Say that a human officer must approve it
    before anything is sent.
+5. After the tools, always write the final answer yourself: what you found, what you drafted, and what the person should do.
 India uses the NAQI with GRAP stages; other countries use the US AQI. Health advice follows WHO guidance."""
 
 from ..engines.response import MEASURES as _M  # noqa: E402

@@ -19,6 +19,7 @@ Build with AI: Code for Communities (2nd ed.) · **Track 02 — Clean Air & Clim
 Albedo-Watch is a citizen-powered air-intelligence network on a live, photorealistic 3D Earth: anyone can report smoke by photo or voice note in their own language, and **Gemini 3.7 Flash** verifies it against NASA satellite heat detections and routes it to the responsible authority.
 It traces each city's pollution back to its sources, forecasts unhealthy air 72 hours ahead for **233 cities in 104 countries** (India in state-level depth with CPCB NAQI and GRAP), and drafts action orders with advisories in **English plus the local languages**, backed by today's NASA satellite image — a human approves every dispatch.
 States and countries improve each other's forecasts through **regional federated learning** that shares only model weights, never raw data.
+**Albedo Copilot**, a Gemini agent with tools, operates the whole app from one question in any language, and **Protect** turns forecasts into safe hours and advisories for the schools and hospitals in the smoke.
 
 ## What you can do in it
 
@@ -30,7 +31,12 @@ States and countries improve each other's forecasts through **regional federated
 | **Trace** | 48 h ensemble back-trajectories through the live wind field → which fires the air crossed → an explainable source breakdown + response simulator |
 | **Citizen** | Photo / voice note / WhatsApp voice file in any language → Gemini classification, authenticity check, satellite corroboration, jurisdiction routing, reply in the citizen's language with voice |
 | **Command** | GRAP-aligned (India) or WHO-referenced (elsewhere) action orders; pick languages (English + local, up to 4); NASA image evidence read by Gemini; SMS + TTS voice; approve → dispatch → acknowledge → resolve ledger |
-| **Commons** | Regional federated learning across 48 nodes (Indian states + countries) with per-node personalisation and optional differential privacy |
+| **Protect** | Schools, colleges, hospitals and clinics in a city or a smoke plume (OpenStreetMap), hour-by-hour safe outdoor windows, one-click advisories to principals and hospital administrators |
+| **Accuracy** | Regional federated learning across 48 nodes (Indian states + countries) with per-node personalisation and optional differential privacy, explained in plain language |
+| **Albedo Copilot** | A Gemini agent with 9 tools over our engines (find place, city forecast, worst air, hotspots, source trace, sensitive sites, live air at a point, response simulation, draft order). Each tool call also moves the map; a human approves any order |
+| **My Air Plan** | Pick a health profile (asthma, child, elderly, outdoor work…) for personal safe hours at your hub, and a Web Push alert before unhealthy air arrives (Cloud Scheduler checks every 2 h) |
+| **Live reports** | Real-time picture notifications pinned on the globe: citizen photo reports, today's news photos about smoke and smog (GDELT), and NASA satellite views of new fires |
+| **3D city & lenses** | OpenStreetMap building model (where Google's 3D mesh is flat) or Google Photorealistic 3D, wrapped in haze computed from the PM2.5 measured there; NASA lenses for aerosol haze, land-surface heat and night lights |
 
 ## Honest numbers (live — recomputed every few hours)
 
@@ -39,12 +45,14 @@ States and countries improve each other's forecasts through **regional federated
 
 ## Google AI & Cloud — doing real work
 
-- **Gemini 3.7 Flash** (AI Studio): multimodal evidence analysis (image + audio), authenticity checks, source narratives, alert drafting in native scripts, "Ask Albedo" Q&A in any Indian language. Model cascade 3.7 → 3.5 → 2.5 Flash with internal failover, so demos never go dark.
+- **Gemini 3.7 Flash** (AI Studio): the **Albedo Copilot agent** (function calling over 9 tools, UI actions per step), multimodal evidence analysis (image + audio), authenticity checks, source narratives, orders and advisories drafted natively in 27 languages. Model cascade 3.7 → 2.5 → 3.5 Flash with failover, and the agent returns the facts it already gathered if a model stalls.
+- **Google Flow (Veo 3.1)**: the landing-page films and the demo's cutaways (labelled as AI-generated).
 - **Gemini 3.8 Flash TTS**: voice advisories and citizen replies.
 - **Google Maps Platform**: Air Quality API history (station-fused ground truth for federated training), Geocoding (jurisdiction routing, country filter).
-- **Cloud Run** (asia-south1, scales to zero) · **Firestore** (reports + action ledger) · **Secret Manager** (all keys).
+- **Cloud Run** (asia-south1) · **Firestore** (reports, action ledger, push subscriptions) · **Secret Manager** (all keys) · **Cloud Scheduler** (push-alert checks every 2 h).
+- **Google Maps Platform**: Air Quality API (live measured index at any point + history), Map Tiles API (Photorealistic 3D and 2D satellite tiles), Street View (Static + 360° Embed, outdoor official imagery), Geocoding (forward and reverse).
 - **Google Map Tiles API** (Photorealistic 3D Tiles) and the **Air Quality heatmap** layer on a CesiumJS globe; **Street View Static** for street-level context (live, never stored).
-- Open public data: **NASA FIRMS** VIIRS S-NPP + NOAA-20 (global), **NASA GIBS** daily VIIRS imagery, **CAMS** global composition forecasts and NWP winds via Open-Meteo, **Sensor.Community** open citizen PM sensors, **Esri World Imagery**, and **OpenAQ** official stations when a key is configured.
+- Open public data: **NASA FIRMS** VIIRS S-NPP + NOAA-20 (global), **NASA GIBS** daily VIIRS imagery, **CAMS** global composition forecasts and NWP winds via Open-Meteo, **Sensor.Community** open citizen PM sensors, **Esri World Imagery**, **OpenAQ** (6,560 reference-monitor sites, 3,900+ reporting live), **OpenStreetMap** (buildings, schools, hospitals via Overpass) and **GDELT** (news photos).
 
 ## Built for India — and beyond
 

@@ -92,12 +92,16 @@ async def s5(pg, T, c):
 
 async def s6(pg, T, c):
     await pg.goto(BASE + "/app")
-    await pg.get_by_role("button", name="HAZE", exact=True).wait_for(timeout=60000)
-    await pg.wait_for_timeout(5000); c.mark("start")
-    await pg.get_by_role("button", name="HAZE", exact=True).click(); await pg.wait_for_timeout(6500)
-    await pg.get_by_role("button", name="HEAT", exact=True).click(); await pg.wait_for_timeout(5000)
-    await pg.get_by_role("button", name="NIGHT", exact=True).click(); await pg.wait_for_timeout(4000)
-    await pg.get_by_role("button", name="HAZE", exact=True).click(); await pg.wait_for_timeout(2500)
+    btn = pg.get_by_role("button", name="✦ Copilot")
+    await btn.wait_for(timeout=60000); await pg.wait_for_timeout(3000); c.mark("start")
+    await btn.click(); await pg.wait_for_timeout(900)
+    await pg.locator(".ask-in input").type("Which schools in Delhi should keep children indoors today? Draft a notice to principals in Hindi.", delay=28)
+    await pg.wait_for_timeout(500)
+    await pg.get_by_role("button", name="Ask", exact=True).click(); c.mark("send")
+    await pg.wait_for_selector(".msg.a .msg-foot", timeout=150000); c.mark("done")
+    await pg.wait_for_timeout(9500)           # the agent's actions play: fly to Delhi, open Protect, open the draft
+    await pg.locator(".ask .x").click(); await pg.wait_for_timeout(2500)
+    await smooth_scroll(pg, 520, 3500, PANEL); await pg.wait_for_timeout(2000)
 
 
 async def s7(pg, T, c):
