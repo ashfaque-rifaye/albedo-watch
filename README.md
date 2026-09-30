@@ -171,7 +171,7 @@ sequenceDiagram
     end
     G-->>A: final answer
     A-->>W: answer, tool steps, UI actions
-    W->>U: the map plays the actions; the draft waits in Command for approval
+    W->>U: the map plays the actions, and the draft waits in Command for approval
 ```
 
 ## How the key parts work
