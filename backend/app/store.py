@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import defaultdict
 import uuid
 from typing import Any
 
@@ -18,7 +19,7 @@ log = logging.getLogger("albedo.store")
 
 class Store:
     def __init__(self) -> None:
-        self._mem: dict[str, dict[str, dict]] = {"reports": {}, "alerts": {}}
+        self._mem: dict[str, dict[str, dict]] = defaultdict(dict)  # any collection: reports, alerts, push_subs…
         self._lock = threading.Lock()
         self._fs = None
         self.backend = "memory"
