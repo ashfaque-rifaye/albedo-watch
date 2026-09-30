@@ -1,0 +1,223 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1160" viewBox="0 0 1600 1160" font-family="Segoe UI, Inter, Helvetica Neue, Arial, sans-serif" role="img" aria-label="Albedo-Watch architecture: people use a React and CesiumJS web app on Cloud Run; a FastAPI backend with Gemini agents and numerical engines calls Google AI, Google Maps Platform and open data, and uses Firestore, Secret Manager, Cloud Scheduler, Cloud Build, Artifact Registry and Cloud Logging.">
+<defs>
+<linearGradient id="gem" x1="0" x2="1"><stop offset="0" stop-color="#4285F4"/><stop offset="0.5" stop-color="#9b72cb"/><stop offset="1" stop-color="#d96570"/></linearGradient>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a3afc0"/></marker>
+<marker id="c" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6fe3ff"/></marker>
+<marker id="p" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a78bfa"/></marker>
+<marker id="g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#34A853"/></marker>
+<marker id="o" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f2a548"/></marker>
+</defs>
+<rect width="1600" height="1160" rx="26" fill="#0b1220"/>
+<text x="48" y="62" font-size="30" font-weight="700" fill="#eef2f7" text-anchor="start">Albedo-Watch · system architecture</text>
+<text x="48" y="94" font-size="16.5" font-weight="400" fill="#a3afc0" text-anchor="start">One container on Cloud Run. Gemini reasons, Google Maps Platform and open data sense, and a human approves every order.</text>
+<text x="40" y="150" font-size="13" font-weight="700" fill="#7d8aa0" text-anchor="start">PEOPLE</text>
+<rect x="40" y="166" width="262" height="160" rx="14" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="40" y="166" width="262" height="5" rx="2.5" fill="#6fe3ff"/>
+<text x="58" y="200" font-size="19" font-weight="700" fill="#eef2f7" text-anchor="start">Citizens</text>
+<text x="58" y="222" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">phone or desktop browser</text>
+<circle cx="62" cy="249" r="2.6" fill="#6fe3ff"/>
+<text x="72" y="254" font-size="14.5" font-weight="400" fill="#eef2f7" text-anchor="start">Photo and voice reports</text>
+<circle cx="62" cy="274" r="2.6" fill="#6fe3ff"/>
+<text x="72" y="279" font-size="14.5" font-weight="400" fill="#eef2f7" text-anchor="start">My Air Plan, push alerts</text>
+<circle cx="62" cy="299" r="2.6" fill="#6fe3ff"/>
+<text x="72" y="304" font-size="14.5" font-weight="400" fill="#eef2f7" text-anchor="start">Live picture reports</text>
+<rect x="40" y="342" width="262" height="160" rx="14" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="40" y="342" width="262" height="5" rx="2.5" fill="#f2a548"/>
+<text x="58" y="376" font-size="19" font-weight="700" fill="#eef2f7" text-anchor="start">Officials</text>
+<text x="58" y="398" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">SPCB · district · municipal</text>
+<circle cx="62" cy="425" r="2.6" fill="#f2a548"/>
+<text x="72" y="430" font-size="14.5" font-weight="400" fill="#eef2f7" text-anchor="start">Detect, Trace, Forecast</text>
+<circle cx="62" cy="450" r="2.6" fill="#f2a548"/>
+<text x="72" y="455" font-size="14.5" font-weight="400" fill="#eef2f7" text-anchor="start">Simulate measures, value</text>
+<circle cx="62" cy="475" r="2.6" fill="#f2a548"/>
+<text x="72" y="480" font-size="14.5" font-weight="400" fill="#eef2f7" text-anchor="start">Approve and dispatch</text>
+<rect x="40" y="518" width="262" height="135" rx="14" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="40" y="518" width="262" height="5" rx="2.5" fill="#ff8fa3"/>
+<text x="58" y="552" font-size="19" font-weight="700" fill="#eef2f7" text-anchor="start">Schools &amp; hospitals</text>
+<text x="58" y="574" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">principals · administrators</text>
+<circle cx="62" cy="601" r="2.6" fill="#ff8fa3"/>
+<text x="72" y="606" font-size="14.5" font-weight="400" fill="#eef2f7" text-anchor="start">Safe outdoor hours</text>
+<circle cx="62" cy="626" r="2.6" fill="#ff8fa3"/>
+<text x="72" y="631" font-size="14.5" font-weight="400" fill="#eef2f7" text-anchor="start">Advisories in their language</text>
+<rect x="40" y="690" width="262" height="150" rx="14" fill="#111a2b" stroke="#23324b" stroke-width="1.2" stroke-dasharray="5 5"/>
+<text x="58" y="722" font-size="19" font-weight="700" fill="#eef2f7" text-anchor="start">Reach</text>
+<text x="58" y="748" font-size="14.5" font-weight="400" fill="#eef2f7" text-anchor="start">Web Push alerts (live)</text>
+<text x="58" y="772" font-size="14.5" font-weight="400" fill="#eef2f7" text-anchor="start">Email · WhatsApp · SMS · IVR</text>
+<text x="58" y="794" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start" font-style="italic">(simulated in the prototype)</text>
+<text x="58" y="822" font-size="13.5" font-weight="600" fill="#f2a548" text-anchor="start">every order human-approved</text>
+<path d="M 302 246 H 322" fill="none" stroke="#6fe3ff" stroke-width="1.6" stroke-linejoin="round"/>
+<path d="M 302 422 H 322" fill="none" stroke="#6fe3ff" stroke-width="1.6" stroke-linejoin="round"/>
+<path d="M 302 585 H 322" fill="none" stroke="#6fe3ff" stroke-width="1.6" stroke-linejoin="round"/>
+<path d="M 322 246 V 585" fill="none" stroke="#6fe3ff" stroke-width="1.6" stroke-linejoin="round"/>
+<path d="M 322 280 H 352" fill="none" stroke="#6fe3ff" stroke-width="2" marker-end="url(#c)" stroke-linejoin="round"/>
+<text x="318" y="872" font-size="12" font-weight="400" fill="#eef2f7" text-anchor="start"></text>
+<rect x="336" y="122" width="700" height="988" rx="20" fill="#0d1626" stroke="#4285F4" stroke-width="1.8"/>
+<rect x="354" y="136" width="379" height="26" rx="13" fill="#4285F4" fill-opacity="0.16" stroke="#4285F4" stroke-opacity="0.7"/>
+<text x="365" y="154" font-size="13" font-weight="700" fill="#4285F4" text-anchor="start">GOOGLE CLOUD · CLOUD RUN · asia-south1 (Mumbai)</text>
+<rect x="356" y="180" width="660" height="176" rx="14" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<text x="374" y="211" font-size="20" font-weight="700" fill="#eef2f7" text-anchor="start">Web app</text>
+<text x="472" y="211" font-size="15" font-weight="400" fill="#a3afc0" text-anchor="start">React 19 · Vite · CesiumJS · TypeScript</text>
+<rect x="374.0" y="232" width="200.0" height="42" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="374.0" y="241" width="3" height="24" rx="1.5" fill="#6fe3ff"/>
+<text x="388.0" y="258.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">3D globe, Mission Control</text>
+<rect x="586.0" y="232" width="200.0" height="42" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="586.0" y="241" width="3" height="24" rx="1.5" fill="#6fe3ff"/>
+<text x="600.0" y="258.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">8 workspaces</text>
+<rect x="798.0" y="232" width="200.0" height="42" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="798.0" y="241" width="3" height="24" rx="1.5" fill="#a78bfa"/>
+<text x="812.0" y="258.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Albedo Copilot drawer</text>
+<rect x="374.0" y="286" width="200.0" height="42" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="374.0" y="295" width="3" height="24" rx="1.5" fill="#6fe3ff"/>
+<text x="388.0" y="312.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">3D city + haze shader</text>
+<rect x="586.0" y="286" width="200.0" height="42" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="586.0" y="295" width="3" height="24" rx="1.5" fill="#6fe3ff"/>
+<text x="600.0" y="312.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Service worker, Web Push</text>
+<rect x="798.0" y="286" width="200.0" height="42" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="798.0" y="295" width="3" height="24" rx="1.5" fill="#6fe3ff"/>
+<text x="812.0" y="312.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Phone layout</text>
+<path d="M 686.0 356 V 398" fill="none" stroke="#a3afc0" stroke-width="2" marker-end="url(#a)" stroke-linejoin="round"/>
+<text x="698.0" y="383" font-size="13.5" font-weight="600" fill="#a3afc0" text-anchor="start">REST · JSON · /api</text>
+<rect x="356" y="402" width="660" height="404" rx="14" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<text x="374" y="433" font-size="20" font-weight="700" fill="#eef2f7" text-anchor="start">FastAPI backend</text>
+<text x="550" y="433" font-size="15" font-weight="400" fill="#a3afc0" text-anchor="start">Python 3.12 · httpx · NumPy</text>
+<text x="374.0" y="470" font-size="13" font-weight="700" fill="#a78bfa" text-anchor="start">AGENTS · GEMINI</text>
+<rect x="374.0" y="484" width="200.0" height="54" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="374.0" y="493" width="3" height="36" rx="1.5" fill="#a78bfa"/>
+<text x="388.0" y="506" font-size="15" font-weight="650" fill="#eef2f7" text-anchor="start">Albedo Copilot</text>
+<text x="388.0" y="525" font-size="13" font-weight="400" fill="#a3afc0" text-anchor="start">function calling · 9 tools</text>
+<rect x="374.0" y="547" width="200.0" height="54" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="374.0" y="556" width="3" height="36" rx="1.5" fill="#a78bfa"/>
+<text x="388.0" y="569" font-size="15" font-weight="650" fill="#eef2f7" text-anchor="start">Citizen agent</text>
+<text x="388.0" y="588" font-size="13" font-weight="400" fill="#a3afc0" text-anchor="start">photo + voice · authenticity</text>
+<rect x="374.0" y="610" width="200.0" height="54" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="374.0" y="619" width="3" height="36" rx="1.5" fill="#a78bfa"/>
+<text x="388.0" y="632" font-size="15" font-weight="650" fill="#eef2f7" text-anchor="start">Command agent</text>
+<text x="388.0" y="651" font-size="13" font-weight="400" fill="#a3afc0" text-anchor="start">orders · advisories · narratives</text>
+<text x="586.0" y="470" font-size="13" font-weight="700" fill="#f2a548" text-anchor="start">ENGINES</text>
+<rect x="586.0" y="484" width="200.0" height="40" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="586.0" y="493" width="3" height="22" rx="1.5" fill="#f2a548"/>
+<text x="600.0" y="509.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Hidden-hotspot detection</text>
+<rect x="586.0" y="533" width="200.0" height="40" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="586.0" y="542" width="3" height="22" rx="1.5" fill="#f2a548"/>
+<text x="600.0" y="558.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">48 h back-trajectories</text>
+<rect x="586.0" y="582" width="200.0" height="40" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="586.0" y="591" width="3" height="22" rx="1.5" fill="#f2a548"/>
+<text x="600.0" y="607.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Forecast · NAQI · GRAP</text>
+<rect x="586.0" y="631" width="200.0" height="40" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="586.0" y="640" width="3" height="22" rx="1.5" fill="#f2a548"/>
+<text x="600.0" y="656.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Federated learning + DP</text>
+<rect x="586.0" y="680" width="200.0" height="40" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="586.0" y="689" width="3" height="22" rx="1.5" fill="#f2a548"/>
+<text x="600.0" y="705.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Simulator + health ₹</text>
+<rect x="586.0" y="729" width="200.0" height="40" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="586.0" y="738" width="3" height="22" rx="1.5" fill="#f2a548"/>
+<text x="600.0" y="754.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Protect · push checker</text>
+<text x="798.0" y="470" font-size="13" font-weight="700" fill="#34A853" text-anchor="start">DATA HUB &amp; SERVICE</text>
+<rect x="798.0" y="484" width="200.0" height="40" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="798.0" y="493" width="3" height="22" rx="1.5" fill="#34A853"/>
+<text x="812.0" y="509.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">TTL cache · single-flight</text>
+<rect x="798.0" y="533" width="200.0" height="40" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="798.0" y="542" width="3" height="22" rx="1.5" fill="#34A853"/>
+<text x="812.0" y="558.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Stale-on-error snapshots</text>
+<rect x="798.0" y="582" width="200.0" height="40" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="798.0" y="591" width="3" height="22" rx="1.5" fill="#34A853"/>
+<text x="812.0" y="607.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Rate limits · sec. headers</text>
+<rect x="798.0" y="631" width="200.0" height="40" rx="9" fill="#162238" stroke="#2a3b58" stroke-width="1"/>
+<rect x="798.0" y="640" width="3" height="22" rx="1.5" fill="#34A853"/>
+<text x="812.0" y="656.0" font-size="14.5" font-weight="600" fill="#eef2f7" text-anchor="start">Offline mode · 36 tests</text>
+<path d="M 686.0 806 V 846" fill="none" stroke="#a3afc0" stroke-width="2" marker-end="url(#a)" stroke-linejoin="round"/>
+<text x="698.0" y="832" font-size="13.5" font-weight="600" fill="#a3afc0" text-anchor="start">persist · secrets · schedule · deploy</text>
+<rect x="356.0" y="852" width="212.0" height="112" rx="12" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="356.0" y="852" width="212.0" height="4" rx="2" fill="#4285F4"/>
+<text x="372.0" y="886" font-size="17" font-weight="700" fill="#eef2f7" text-anchor="start">Firestore</text>
+<text x="372.0" y="912" font-size="14" font-weight="400" fill="#eef2f7" text-anchor="start">reports · action ledger</text>
+<text x="372.0" y="934" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">push subs · snapshots</text>
+<rect x="580.0" y="852" width="212.0" height="112" rx="12" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="580.0" y="852" width="212.0" height="4" rx="2" fill="#4285F4"/>
+<text x="596.0" y="886" font-size="17" font-weight="700" fill="#eef2f7" text-anchor="start">Secret Manager</text>
+<text x="596.0" y="912" font-size="14" font-weight="400" fill="#eef2f7" text-anchor="start">Gemini, Maps, OpenAQ keys</text>
+<text x="596.0" y="934" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">VAPID + cron keys</text>
+<rect x="804.0" y="852" width="212.0" height="112" rx="12" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="804.0" y="852" width="212.0" height="4" rx="2" fill="#4285F4"/>
+<text x="820.0" y="886" font-size="17" font-weight="700" fill="#eef2f7" text-anchor="start">Cloud Scheduler</text>
+<text x="820.0" y="912" font-size="14" font-weight="400" fill="#eef2f7" text-anchor="start">every 2 h → /api/push/run</text>
+<text x="820.0" y="934" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">health-profile alerts</text>
+<rect x="356.0" y="976" width="212.0" height="112" rx="12" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="356.0" y="976" width="212.0" height="4" rx="2" fill="#4285F4"/>
+<text x="372.0" y="1010" font-size="17" font-weight="700" fill="#eef2f7" text-anchor="start">Cloud Build</text>
+<text x="372.0" y="1036" font-size="14" font-weight="400" fill="#eef2f7" text-anchor="start">builds the Dockerfile</text>
+<text x="372.0" y="1058" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">gcloud run deploy --source</text>
+<rect x="580.0" y="976" width="212.0" height="112" rx="12" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="580.0" y="976" width="212.0" height="4" rx="2" fill="#4285F4"/>
+<text x="596.0" y="1010" font-size="17" font-weight="700" fill="#eef2f7" text-anchor="start">Artifact Registry</text>
+<text x="596.0" y="1036" font-size="14" font-weight="400" fill="#eef2f7" text-anchor="start">container images</text>
+<text x="596.0" y="1058" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">one image, two stages</text>
+<rect x="804.0" y="976" width="212.0" height="112" rx="12" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="804.0" y="976" width="212.0" height="4" rx="2" fill="#4285F4"/>
+<text x="820.0" y="1010" font-size="17" font-weight="700" fill="#eef2f7" text-anchor="start">Cloud Logging</text>
+<text x="820.0" y="1036" font-size="14" font-weight="400" fill="#eef2f7" text-anchor="start">request IDs · latency</text>
+<text x="820.0" y="1058" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">errors with trace IDs</text>
+<path d="M 356 760 H 322 V 765 H 304" fill="none" stroke="#6fe3ff" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#c)" stroke-linejoin="round"/>
+<text x="350" y="750" font-size="13" font-weight="700" fill="#6fe3ff" text-anchor="end">Web Push</text>
+<rect x="1104" y="122" width="456" height="318" rx="16" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="1104" y="122" width="456" height="5" rx="2.5" fill="url(#gem)"/>
+<text x="1124" y="160" font-size="21" font-weight="700" fill="#eef2f7" text-anchor="start">Google AI</text>
+<text x="1124" y="183" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">google-genai SDK · server-side · model cascade</text>
+<circle cx="1130" cy="217" r="4.5" fill="#a78bfa"/>
+<text x="1144" y="222" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Gemini 3.7 Flash</text>
+<text x="1144" y="241" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">Copilot agent · photo + voice checks · drafting</text>
+<circle cx="1130" cy="264" r="4.5" fill="#a78bfa"/>
+<text x="1144" y="269" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Gemini 3.5 Flash-Lite</text>
+<text x="1144" y="288" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">narration · translation</text>
+<circle cx="1130" cy="311" r="4.5" fill="#a78bfa"/>
+<text x="1144" y="316" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Gemini 3.5 Flash · 2.5 Flash</text>
+<text x="1144" y="335" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">fallback when the primary is busy</text>
+<circle cx="1130" cy="358" r="4.5" fill="#a78bfa"/>
+<text x="1144" y="363" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Gemini 3.8 Flash TTS</text>
+<text x="1144" y="382" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">spoken replies and advisories</text>
+<circle cx="1130" cy="405" r="4.5" fill="#a78bfa"/>
+<text x="1144" y="410" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Veo 3.1 in Google Flow</text>
+<text x="1144" y="429" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">landing-page films (labelled AI)</text>
+<rect x="1104" y="456" width="456" height="318" rx="16" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="1104" y="456" width="456" height="5" rx="2.5" fill="#34A853"/>
+<text x="1124" y="494" font-size="21" font-weight="700" fill="#eef2f7" text-anchor="start">Google Maps Platform</text>
+<text x="1124" y="517" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">Google basemap only · display only · attribution shown</text>
+<circle cx="1130" cy="551" r="4.5" fill="#34A853"/>
+<text x="1144" y="556" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Map Tiles API</text>
+<text x="1144" y="575" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">satellite + labels, dark roadmap, Photorealistic 3D</text>
+<circle cx="1130" cy="598" r="4.5" fill="#34A853"/>
+<text x="1144" y="603" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Air Quality API</text>
+<text x="1144" y="622" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">live local index at a point · heatmap tiles</text>
+<circle cx="1130" cy="645" r="4.5" fill="#34A853"/>
+<text x="1144" y="650" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Street View Static API</text>
+<text x="1144" y="669" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">metadata only: nearest outdoor pano ID</text>
+<circle cx="1130" cy="692" r="4.5" fill="#34A853"/>
+<text x="1144" y="697" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Maps Embed API</text>
+<text x="1144" y="716" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">Street View 360° in the place panel</text>
+<circle cx="1130" cy="739" r="4.5" fill="#34A853"/>
+<text x="1144" y="744" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Never cached, trained on or voiced</text>
+<text x="1144" y="763" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">kept out of Gemini, TTS and the models</text>
+<rect x="1104" y="790" width="456" height="320" rx="16" fill="#111a2b" stroke="#23324b" stroke-width="1.2"/>
+<rect x="1104" y="790" width="456" height="5" rx="2.5" fill="#f2a548"/>
+<text x="1124" y="828" font-size="21" font-weight="700" fill="#eef2f7" text-anchor="start">Open data</text>
+<text x="1124" y="851" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">httpx · cached 3–6 h · no licence fee</text>
+<circle cx="1130" cy="885" r="4.5" fill="#f2a548"/>
+<text x="1144" y="890" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">NASA FIRMS · NASA GIBS</text>
+<text x="1144" y="909" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">VIIRS fires · satellite imagery and lenses</text>
+<circle cx="1130" cy="932" r="4.5" fill="#f2a548"/>
+<text x="1144" y="937" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">Copernicus CAMS via Open-Meteo</text>
+<text x="1144" y="956" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">PM2.5, NO₂, dust, winds, boundary layer</text>
+<circle cx="1130" cy="979" r="4.5" fill="#f2a548"/>
+<text x="1144" y="984" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">OpenAQ · Sensor.Community</text>
+<text x="1144" y="1003" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">reference monitors (model truth) · citizen PM</text>
+<circle cx="1130" cy="1026" r="4.5" fill="#f2a548"/>
+<text x="1144" y="1031" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">OpenStreetMap</text>
+<text x="1144" y="1050" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">Nominatim place names · Overpass buildings, schools</text>
+<circle cx="1130" cy="1073" r="4.5" fill="#f2a548"/>
+<text x="1144" y="1078" font-size="16" font-weight="650" fill="#eef2f7" text-anchor="start">GDELT · Esri World Imagery</text>
+<text x="1144" y="1097" font-size="13.5" font-weight="400" fill="#a3afc0" text-anchor="start">news photos · Open-data map mode</text>
+<path d="M 1016 470 H 1066 V 280 H 1100" fill="none" stroke="#a78bfa" stroke-width="2" marker-end="url(#p)" stroke-linejoin="round"/>
+<path d="M 1016 600 H 1100" fill="none" stroke="#34A853" stroke-width="2" marker-end="url(#g)" stroke-linejoin="round"/>
+<path d="M 1016 740 H 1066 V 930 H 1100" fill="none" stroke="#f2a548" stroke-width="2" marker-end="url(#o)" stroke-linejoin="round"/>
+<path d="M 1016 300 H 1084 V 560 H 1100" fill="none" stroke="#34A853" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#g)" stroke-linejoin="round"/>
+</svg>

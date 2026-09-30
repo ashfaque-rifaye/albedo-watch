@@ -486,11 +486,11 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
           {c3.vis_km != null && c3.pm25 != null && (
             <div className="vis" style={{ marginTop: 10 }}>
               <b className="display">~{c3.vis_km >= 10 ? Math.round(c3.vis_km) : c3.vis_km.toFixed(1)} km</b>
-              <span className="muted" style={{ fontSize: 13 }}>estimated visibility: the haze you see is computed from PM2.5 {fmt(c3.pm25, 0)} µg/m³ at {fmt(c3.rh, 0)}% humidity</span>
+              <span className="muted" style={{ fontSize: 13 }}>estimated visibility: the haze you see is computed from the corrected PM2.5 forecast here, {fmt(c3.pm25, 0)} µg/m³, at {fmt(c3.rh, 0)}% humidity</span>
             </div>
           )}
           <label className="layer-toggle" style={{ marginTop: 6 }}>
-            <input type="checkbox" checked={c3.haze} onChange={(e) => ctx.setCity3d((c) => (c ? { ...c, haze: e.target.checked } : c))} /> Show the air (haze from measured particles)
+            <input type="checkbox" checked={c3.haze} onChange={(e) => ctx.setCity3d((c) => (c ? { ...c, haze: e.target.checked } : c))} /> Show the air (haze from the particles forecast here)
           </label>
         </section>
       )}

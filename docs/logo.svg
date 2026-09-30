@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64" role="img" aria-label="Albedo-Watch logo: an eye whose iris is a lit planet with a satellite on its orbit">
+  <defs>
+    <radialGradient id="sph" cx="30%" cy="28%" r="80%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".35" stop-color="#f4e7c3"/>
+      <stop offset=".75" stop-color="#8f7a52"/>
+      <stop offset="1" stop-color="#2a2418"/>
+    </radialGradient>
+    <linearGradient id="lid" x1="0" x2="1">
+      <stop offset="0" stop-color="#6fe3ff" stop-opacity=".45"/>
+      <stop offset=".5" stop-color="#f1e6c8"/>
+      <stop offset="1" stop-color="#6fe3ff" stop-opacity=".45"/>
+    </linearGradient>
+    <clipPath id="iris"><circle cx="32" cy="32" r="12.5"/></clipPath>
+    <clipPath id="eye"><path d="M3 32 C 14 12, 50 12, 61 32 C 50 52, 14 52, 3 32 Z"/></clipPath>
+  </defs>
+  <path d="M3 32 C 14 12, 50 12, 61 32 C 50 52, 14 52, 3 32 Z" fill="#0b1018" stroke="url(#lid)" stroke-width="2.2"/>
+  <g clip-path="url(#eye)">
+    <ellipse cx="32" cy="32" rx="22" ry="7.5" fill="none" stroke="#6fe3ff" stroke-width="1.2" stroke-dasharray="2 3" opacity=".8" transform="rotate(-18 32 32)"/>
+  </g>
+  <g clip-path="url(#iris)">
+    <circle cx="32" cy="32" r="12.5" fill="url(#sph)"/>
+    <circle cx="27" cy="27" r="1.1" fill="#ff8a3d"/>
+    <circle cx="35" cy="30" r=".8" fill="#ffb35c"/>
+  </g>
+  <circle cx="32" cy="32" r="12.5" fill="none" stroke="rgba(255,255,255,.35)" stroke-width=".6"/>
+  <circle cx="27.5" cy="26.5" r="1.8" fill="#fff"/>
+  <g transform="rotate(-18 32 32)">
+    <circle cx="54" cy="32" r="4.6" fill="#ff6a2b" opacity=".22"/>
+    <circle cx="54" cy="32" r="2.1" fill="#ff7a3d"/>
+  </g>
+</svg>
