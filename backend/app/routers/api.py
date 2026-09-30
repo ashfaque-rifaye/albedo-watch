@@ -9,14 +9,15 @@ import math
 import time
 from typing import Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from .. import llm
-from ..agents import citizen, command
+from ..agents import citizen, command, copilot
 from ..config import settings
-from ..engines import attribution, datahub, federated, forecast, hotspots, place, response
+from ..engines import attribution, datahub, federated, forecast, hotspots, place, protect, response
+from ..engines import health as health_value
 from ..engines.naqi import category, grap_stage
 from ..registry import CITY_BY_ID, COUNTRIES, LANGUAGE_NAMES, STATES, WORLD_COUNTRIES, languages_for_country, languages_of
 from ..sources import cache, gibs, google, news, osm
@@ -63,6 +64,7 @@ async def meta():
     return {
         "product": "Albedo-Watch", "model": llm.model_label(), "store": store.backend,
         "maps_browser_key": settings.google_browser_key or None,
+        "vapid_public_key": settings.vapid_public_key or None,
         "states": {k: {"name": s.name, "languages": list(s.languages), "authority": s.authority} for k, s in STATES.items()},
         "languages": LANGUAGE_NAMES, "countries": COUNTRIES, "freshness": _freshness(),
         "country_languages": {k: list(v.languages) for k, v in WORLD_COUNTRIES.items()},
@@ -266,6 +268,88 @@ async def _refresh_news():
         _news_refresh.clear()
 
 
+class CopilotMsg(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(max_length=4000)
+
+
+class CopilotReq(BaseModel):
+    messages: list[CopilotMsg] = Field(min_length=1, max_length=16)
+
+
+@router.post("/copilot")
+async def copilot_run(req: CopilotReq):
+    """Gemini agent with tools over Albedo-Watch's engines; falls back to the plain assistant."""
+    msgs = [m.model_dump() for m in req.messages]
+    try:
+        return await copilot.run(msgs)
+    except Exception as exc:
+        log.warning("copilot fell back to plain ask (%s)", type(exc).__name__)
+        r = await ask(AskReq(question=msgs[-1]["text"][:800]))
+        return {"answer": r["answer"], "steps": [], "actions": [], "model": r.get("model"), "fallback": True}
+
+
+# --------------------------------------------------------------------------- #
+# push alerts for a citizen's hub
+# --------------------------------------------------------------------------- #
+class PushKeys(BaseModel):
+    p256dh: str = Field(max_length=200)
+    auth: str = Field(max_length=100)
+
+
+class PushSubscription(BaseModel):
+    endpoint: str = Field(max_length=800, pattern=r"^https://")
+    keys: PushKeys
+
+
+class PushSubReq(BaseModel):
+    subscription: PushSubscription
+    lat: float = Field(ge=-85, le=85)
+    lon: float = Field(ge=-180, le=180)
+    profile: Literal["general", "asthma", "child", "elderly", "pregnant", "heart", "outdoor_worker", "athlete"] = "general"
+    label: str = Field("", max_length=80)
+
+
+@router.post("/push/subscribe")
+async def push_subscribe(req: PushSubReq):
+    if not settings.vapid_private_key:
+        raise HTTPException(503, "push alerts are not configured")
+    from ..engines import push
+    sid = push.sub_id(req.subscription.endpoint)
+    doc = store.put("push_subs", {"id": sid, "subscription": req.subscription.model_dump(), "lat": round(req.lat, 3),
+                                  "lon": round(req.lon, 3), "profile": req.profile, "label": req.label, "last_sent": 0})
+    return {"id": doc["id"], "ok": True}
+
+
+class PushTestReq(BaseModel):
+    endpoint: str = Field(max_length=800)
+
+
+@router.post("/push/test")
+async def push_test(req: PushTestReq):
+    """Send this subscriber their hub's outlook right now (so people can see what an alert looks like)."""
+    from ..engines import push
+    sub = store.get("push_subs", push.sub_id(req.endpoint))
+    if not sub:
+        raise HTTPException(404, "not subscribed")
+    city = await _city(push._nearest(sub["lat"], sub["lon"]).id)
+    msg = push.message_for(city, sub.get("profile", "general")) or {
+        "title": f"{city['name']}: air looks fine for the next 24 h",
+        "body": f"{city['index_system']} {city['naqi']} now ({city['category']['label']}). We'll alert you before it turns unhealthy.",
+        "url": f"/app?mode=place&lat={city['lat']:.4f}&lon={city['lon']:.4f}"}
+    ok = await asyncio.to_thread(push.send, sub, msg)
+    return {"sent": ok, "message": msg}
+
+
+@router.post("/push/run")
+async def push_run(x_cron_key: str = Header(""), force: bool = False):
+    """Called by Cloud Scheduler every two hours."""
+    if not settings.cron_key or x_cron_key != settings.cron_key:
+        raise HTTPException(403, "forbidden")
+    from ..engines import push
+    return await push.run(await _cities(), force=force)
+
+
 @router.get("/live")
 async def live(limit: int = Query(40, ge=1, le=80)):
     """Real-time notifications with pictures, each pinned to a place: citizen reports submitted in
@@ -380,7 +464,45 @@ async def simulate(req: SimulateReq):
     s = c["_series"]; k = s["now_offset"]
     pm = c["pm25"] or 0.0
     other = {"pm10": s["pm10"][k], "no2": s["no2"][k], "so2": s["so2"][k]}
-    return response.simulate(pm, other, shares, req.measures, req.compliance, c["pop_m"])
+    res = response.simulate(pm, other, shares, req.measures, req.compliance, c["pop_m"])
+    res["health"] = health_value.impact(res["reduction"], c["pop_m"], 3, c["country"])
+    return res
+
+
+# --------------------------------------------------------------------------- #
+# protect: schools & hospitals in the smoke
+# --------------------------------------------------------------------------- #
+def fmt_windows(w: dict) -> dict:
+    tz = w.get("tz_offset_h", 5.5)
+    f = lambda t: time.strftime("%H:%M", time.gmtime(t + tz * 3600))  # noqa: E731
+    return {"outdoor_ok": [f"{f(a)}–{f(b)}" for a, b in w.get("outdoor_ok", [])],
+            "stay_indoors": [f"{f(a)}–{f(b)}" for a, b in w.get("stay_indoors", [])]}
+
+
+@router.get("/protect/city/{cid}")
+async def protect_city(cid: str):
+    c = await _city(cid)
+    try:
+        res = await protect.for_city(c)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    return {**res, "windows_text": fmt_windows(res["windows"])}
+
+
+@router.get("/protect/point")
+async def protect_point(lat: float = Query(ge=-85, le=85), lon: float = Query(ge=-180, le=180)):
+    field = await datahub.wind_cheap(lat, lon)
+    dw = await asyncio.to_thread(attribution.downwind, field, lat, lon, 12)
+    near = place._nearest_city(lat, lon)
+    city = next((c for c in await _cities() if near and c["id"] == near[0].id), None)
+    try:
+        res = await protect.along_plume(lat, lon, dw["paths"], city)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    res["plume"] = dw["paths"]
+    if res.get("windows"):
+        res["windows_text"] = fmt_windows(res["windows"])
+    return res
 
 
 # --------------------------------------------------------------------------- #
@@ -471,6 +593,7 @@ class DraftReq(BaseModel):
     lon: float | None = None
     languages: list[str] | None = Field(default=None, max_length=4)
     attach_imagery: bool = True
+    audience: Literal["authority", "schools", "hospitals", "public"] | None = None
 
 
 SAT_SCHEMA = {
@@ -594,6 +717,19 @@ async def draft(req: DraftReq):
             evidence_imgs.append({"kind": "streetview", "url": f"/api/streetview?lat={sv['lat']}&lon={sv['lon']}",
                                   "date": sv.get("date"), "source": "Google Street View (live, not stored)"})
 
+    if req.audience in ("schools", "hospitals") and req.kind == "city" and req.city:
+        try:
+            pr = await protect.for_city(await _city(req.city))
+            ctx["audience"] = ("principals of schools, colleges and pre-schools" if req.audience == "schools"
+                               else "hospital and clinic administrators")
+            ctx["protect"] = {"schools": pr["schools"], "health_facilities": pr["health"], "by_type": pr["counts"],
+                              "local_times": fmt_windows(pr["windows"]),
+                              "examples": [x["name"] for x in pr["top"] if (x["group"] == "school") == (req.audience == "schools")][:6]}
+            ctx["summary"] = (f"Advisory to {ctx['audience']} in {ctx['place']}: {pr['schools']} schools and "
+                              f"{pr['health']} health facilities within {pr['radius_km']} km. " + ctx.get("summary", ""))
+            target["audience"] = req.audience
+        except (RuntimeError, HTTPException):
+            pass
     t0 = time.perf_counter()
     langs = _languages(["en"] + list(default_langs), req.languages)
     # imagery and drafting run in parallel so the officer is never kept waiting on both

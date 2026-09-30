@@ -43,6 +43,24 @@ async def aq_history(lat: float, lon: float, hours: int = 72) -> dict[int, float
     return out
 
 
+async def forward_geocode(query: str) -> dict:
+    """Name or address → coordinates (Google Geocoding)."""
+    key = settings.maps_server_key
+    if not key or settings.offline:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(GEOCODE, params={"address": query[:200], "key": key})
+        res = (r.json().get("results") or [None])[0]
+    except Exception:
+        return {}
+    if not res:
+        return {}
+    loc = res["geometry"]["location"]
+    cc = next((c["short_name"] for c in res.get("address_components", []) if "country" in c.get("types", [])), None)
+    return {"lat": round(loc["lat"], 5), "lon": round(loc["lng"], 5), "address": res.get("formatted_address"), "country": cc}
+
+
 async def reverse_geocode(lat: float, lon: float) -> dict:
     key = settings.maps_server_key
     if not key or settings.offline:

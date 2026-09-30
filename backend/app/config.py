@@ -36,6 +36,9 @@ class Settings(BaseSettings):
 
     # OpenAQ v3 (official ground stations worldwide) — optional
     openaq_api_key: str = ""
+    vapid_private_key: str = ""
+    vapid_public_key: str = ""
+    cron_key: str = ""
 
     # Google Cloud
     gcp_project: str = ""

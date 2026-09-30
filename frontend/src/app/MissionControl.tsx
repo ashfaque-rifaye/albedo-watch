@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Alert, Attribution, BuildingSet, LiveItem, City, Commons, Corridor, FireFeed, Hotspot, Hotspots, LiveEvent, Meta, PlaceIntel, Pulse, Report, Sensors, WindVec } from '../lib/api'
+import type { Alert, Attribution, BuildingSet, CopilotAction, LiveItem, City, Commons, Corridor, FireFeed, Hotspot, Hotspots, LiveEvent, Meta, PlaceIntel, Pulse, Report, Sensors, WindVec } from '../lib/api'
 import { api } from '../lib/api'
 import { fmt, istTime } from '../lib/format'
 import { Logo, Wordmark } from '../components/Logo'
@@ -7,22 +7,24 @@ import { ErrorBoundary } from '../components/ErrorBoundary'
 import type { FlyTarget, GlobeLayers, Lens, Theme, Track } from './Globe'
 import { Coach, EventFeed, Hud, Legend, TourCaption } from './hud'
 import { LiveDetail, LiveToasts } from './LiveToasts'
+import { ProtectPanel } from './Protect'
 import { AskDrawer, CitizenPanel, CommandPanel, CommonsPanel, DetectPanel, ForecastPanel, PlacePanel, PulsePanel, TracePanel } from './panels'
 import './app.css'
 
 const Globe = lazy(() => import('./Globe'))
 
-export type Mode = 'pulse' | 'detect' | 'trace' | 'citizen' | 'forecast' | 'command' | 'commons' | 'place'
+export type Mode = 'pulse' | 'detect' | 'trace' | 'citizen' | 'forecast' | 'protect' | 'command' | 'commons' | 'place'
 const MODES: { id: Exclude<Mode, 'place'>; label: string; verb: string; icon: string }[] = [
   { id: 'pulse', label: 'Pulse', verb: 'Air near you & worldwide', icon: '◉' },
   { id: 'detect', label: 'Detect', verb: 'Hidden hotspots', icon: '◎' },
   { id: 'trace', label: 'Trace', verb: 'Source attribution', icon: '↶' },
   { id: 'citizen', label: 'Citizen', verb: 'Report in any language', icon: '✦' },
   { id: 'forecast', label: 'Forecast', verb: '72 h corridors', icon: '◷' },
+  { id: 'protect', label: 'Protect', verb: 'Schools & hospitals in the smoke', icon: '⛨' },
   { id: 'command', label: 'Command', verb: 'Alerts & action', icon: '▲' },
   { id: 'commons', label: 'Accuracy', verb: 'Forecasts that learn locally', icon: '⬡' },
 ]
-export type DraftFor = { kind: 'city' | 'hotspot' | 'report' | 'place'; city?: string; report_id?: string; lat?: number; lon?: number; label?: string; suggested?: string[] }
+export type DraftFor = { kind: 'city' | 'hotspot' | 'report' | 'place'; city?: string; report_id?: string; lat?: number; lon?: number; label?: string; suggested?: string[]; audience?: 'authority' | 'schools' | 'hospitals' | 'public' }
 export type Hub = { lat: number; lon: number; intel: PlaceIntel | null }
 export type City3D = {
   lat: number; lon: number; label: string; mode: 'model' | 'photoreal'; b: BuildingSet | null; loading: boolean; err: string | null
@@ -82,6 +84,11 @@ export type Ctx = {
   enter3D: (lat: number, lon: number, o?: { intel?: PlaceIntel | null; label?: string; mode?: 'model' | 'photoreal' }) => void
   exit3D: () => void
   setCity3d: (f: (c: City3D | null) => City3D | null) => void
+  protectCity: string | null
+  setSites: (s: [number, number, number][] | null) => void
+  openAlertId: string | null
+  setOpenAlertId: (id: string | null) => void
+  runActions: (a: CopilotAction[]) => void
   layers: GlobeLayers
   setLayers: (l: GlobeLayers) => void
   country: string | null
@@ -140,6 +147,9 @@ export default function MissionControl() {
   const [ping, setPing] = useState<{ lat: number; lon: number; t0: number } | null>(null)
   const [liveOn, setLiveOn] = useState(() => { try { return localStorage.getItem('aw-live') !== 'off' } catch { return true } })
   const [liveItem, setLiveItem] = useState<LiveItem | null>(null)
+  const [protectCity, setProtectCity] = useState<string | null>(null)
+  const [sites, setSites] = useState<[number, number, number][] | null>(null)
+  const [openAlertId, setOpenAlertId] = useState<string | null>(null)
   const [tapped, setTapped] = useState(() => { try { return !!localStorage.getItem('aw-tapped') } catch { return true } })
   const [layers, setLayers] = useState<GlobeLayers>({ wind: true, fires: true, cities: true, hotspots: true, reports: true, sensors: true,
     corridors: false, aq: false, photoreal: false, sunlight: true })
@@ -290,6 +300,19 @@ export default function MissionControl() {
   const clearHub = useCallback(() => { setHub(null); try { localStorage.removeItem('aw-hub') } catch { /* */ } }, [])
   const track = useCallback((lon: number, lat: number, label: string) => { setTrackT({ lon, lat, label }); setFly({ lon, lat, range: 3500, pitch: -35, key: Date.now() }) }, [])
 
+  // The Copilot's tool calls come back as UI actions: play them in order so the map follows its reasoning.
+  const runActions = useCallback((acts: CopilotAction[]) => {
+    acts.slice(0, 6).forEach((a, i) => window.setTimeout(() => {
+      if (a.type === 'fly' && a.lat != null && a.lon != null) setFly({ lon: a.lon, lat: a.lat, range: a.range ?? 2e5, pitch: -50, key: Date.now() })
+      else if (a.type === 'city' && a.id) { setModeRaw('pulse'); selectCity(a.id, true) }
+      else if (a.type === 'mode' && a.mode) { if (a.city) setSelectedCity(a.city); setMode(a.mode as Mode) }
+      else if (a.type === 'place' && a.lat != null && a.lon != null) openPlace(a.lat, a.lon)
+      else if (a.type === 'protect') { setProtectCity(a.city ?? null); setMode('protect') }
+      else if (a.type === 'alert' && a.id) { setOpenAlertId(a.id); setMode('command') }
+      else if (a.type === 'detect') { if (a.scope) setHotScope(a.scope); setMode('detect') }
+    }, i * 1500))
+  }, [selectCity, setMode, openPlace])
+
   const onHotspot = useCallback((h: Hotspot) => {
     setMode('detect')
     setTrackT({ lon: h.lon, lat: h.lat, label: h.admin?.district || h.place.label })
@@ -350,7 +373,7 @@ export default function MissionControl() {
     selectedCity, selectCity, setMode, attribution, setAttribution, setPlume, pick, setPick, pickMode, setPickMode, flyTo,
     refreshReports, refreshAlerts, setCommons, reloadPulse, selectedReport, setSelectedReport, onHotspot, draftFor, setDraftFor,
     place, openPlace, layers, setLayers, country, setCountry, countries, hub, locating, locateMe, clearHub, track,
-    city3d, enter3D, exit3D, setCity3d,
+    city3d, enter3D, exit3D, setCity3d, protectCity, setSites, openAlertId, setOpenAlertId, runActions,
   }
 
   const frame = replay && frameIdx != null ? frames[frameIdx] : null
@@ -373,7 +396,7 @@ export default function MissionControl() {
           pick={pick} hub={hub ? { lat: hub.lat, lon: hub.lon } : null} theme={theme}
           layers={city3d?.mode === 'photoreal' ? { ...layers, photoreal: true } : layers}
           buildings={city3d?.mode === 'model' ? city3d.b : null} buildingTint={city3d?.tint ?? null}
-          haze={city3d?.haze ? city3d.ext : null} ping={ping}
+          haze={city3d?.haze ? city3d.ext : null} ping={ping} sites={mode === 'protect' ? sites : null}
           lens={lens} hud={hud} autoPhotoreal={!mobile} track={trackT} flyTo={fly}
           onCity={(id) => { selectCity(id, true); if (mode !== 'trace' && mode !== 'command') setMode('pulse') }}
           onHotspot={onHotspot}
@@ -403,7 +426,7 @@ export default function MissionControl() {
           <button className="chip chip-btn hide-m" onClick={() => setFireHelp(!fireHelp)} title="What is a heat detection?">
             <span className="live-dot" /> {fmt(fireFeed?.count)} heat detections <span className="q">?</span>
           </button>
-          <button className="btn btn-primary btn-sm ask-btn" onClick={() => setAskOpen(true)}>✦ Ask</button>
+          <button className="btn btn-primary btn-sm ask-btn" onClick={() => setAskOpen(true)}>✦ Copilot</button>
         </div>
       </header>
       {fireHelp && fireFeed && (
@@ -440,6 +463,7 @@ export default function MissionControl() {
             {mode === 'trace' && <TracePanel ctx={ctx} />}
             {mode === 'citizen' && <CitizenPanel ctx={ctx} />}
             {mode === 'forecast' && <ForecastPanel ctx={ctx} />}
+            {mode === 'protect' && <ProtectPanel ctx={ctx} />}
             {mode === 'command' && <CommandPanel ctx={ctx} />}
             {mode === 'commons' && <CommonsPanel ctx={ctx} />}
             {mode === 'place' && <PlacePanel ctx={ctx} />}

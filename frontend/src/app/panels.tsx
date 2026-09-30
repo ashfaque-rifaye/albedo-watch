@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom'
+import { AirPlan } from './AirPlan'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Alert, Cat, City, DraftBody, Hotspot, PlaceIntel, Report, SimResult } from '../lib/api'
+import type { Alert, Cat, City, CopilotStep, DraftBody, Hotspot, PlaceIntel, Report, SimResult } from '../lib/api'
 import { api } from '../lib/api'
 import { LANG_NAMES, ago, fmt, istTime, mdLite } from '../lib/format'
 import { ForecastChart, HBars, RoundsChart, SourceBar } from './charts'
@@ -138,7 +139,7 @@ function HubCard({ ctx }: { ctx: Ctx }) {
           <div className="hub-strip-lab mono"><span>now</span><span>+12 h</span><span>+24 h</span></div>
         </div>
       )}
-      {g.health && <p className="fine" style={{ color: 'var(--ink-2)', margin: 0 }}>{g.health}</p>}
+      <AirPlan intel={i} lat={h.lat} lon={h.lon} vapidKey={ctx.meta?.vapid_public_key} />
       <div className="kv-grid">
         <div><span>Heat detections ≤ 50 km</span><b className="mono">{i.fires.within_50km}</b></div>
         <div><span>Wind</span><b className="mono">{fmt(i.weather.wind_kmh, 0)} km/h from {i.weather.wind_from_compass ?? '—'}</b></div>
@@ -416,6 +417,17 @@ function Simulator({ ctx, city }: { ctx: Ctx; city: string }) {
       <label className="slider">Enforcement compliance <b className="mono">{Math.round(comp * 100)}%</b>
         <input type="range" min={0.2} max={1} step={0.05} value={comp} onChange={(e) => setComp(+e.target.value)} />
       </label>
+      {res?.health && res.health.deaths_avoided > 0 && (
+        <div className="health-val">
+          <div className="eyebrow">Worth, over a 3-day episode (estimate)</div>
+          <div className="hv-row">
+            <div><b className="display">~{fmt(res.health.deaths_avoided, res.health.deaths_avoided < 10 ? 1 : 0)}</b><span>premature deaths avoided</span></div>
+            <div><b className="display">~{fmt(res.health.admissions_avoided)}</b><span>respiratory hospital admissions avoided</span></div>
+            <div><b className="display">{res.health.currency}{fmt(res.health.value, res.health.value < 10 ? 1 : 0)} {res.health.unit}</b><span>health value</span></div>
+          </div>
+          <p className="fine" style={{ margin: 0 }}>{res.health.method}</p>
+        </div>
+      )}
       {res && <p className="fine">{res.caveat}</p>}
     </section>
   )
@@ -755,7 +767,7 @@ function Composer({ ctx, target, onDone, onCancel }: { ctx: Ctx; target: DraftFo
   const at = useSteps(busy, steps, 5500)
   async function go() {
     setBusy(true); setErr(null)
-    const body: DraftBody = { kind: target.kind, city: target.city, report_id: target.report_id, lat: target.lat, lon: target.lon, languages: langs, attach_imagery: imagery }
+    const body: DraftBody = { kind: target.kind, city: target.city, report_id: target.report_id, lat: target.lat, lon: target.lon, languages: langs, attach_imagery: imagery, audience: target.audience }
     try { onDone(await api.draftAlert(body)) } catch (e) {
       setErr((e as Error).name === 'AbortError' ? 'The AI took too long (over 95 s). Please retry — a faster model is used automatically.' : (e as Error).message)
     } finally { setBusy(false) }
@@ -784,6 +796,12 @@ export function CommandPanel({ ctx }: { ctx: Ctx }) {
   const [open, setOpen] = useState<Alert | null>(null)
   const [target, setTarget] = useState<DraftFor | null>(null)
   useEffect(() => { if (ctx.draftFor) { setTarget(ctx.draftFor); setOpen(null); ctx.setDraftFor(null) } }, [ctx.draftFor]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {  // the Copilot can hand over a freshly drafted order
+    if (!ctx.openAlertId) return
+    const id = ctx.openAlertId
+    ctx.setOpenAlertId(null)
+    api.alerts().then((r) => { const a = r.alerts.find((x) => x.id === id); if (a) { setOpen(a); setTarget(null) } }).catch(() => {})
+  }, [ctx.openAlertId]) // eslint-disable-line react-hooks/exhaustive-deps
   const spikes = ctx.cities.filter((c) => c.spike).sort((a, b) => b.spike!.peak_category.level - a.spike!.peak_category.level || b.spike!.peak - a.spike!.peak).slice(0, 8)
   if (open) return <AlertView ctx={ctx} a={open} onBack={() => setOpen(null)} onUpdate={setOpen} />
   return (
@@ -978,9 +996,12 @@ export function CommonsPanel({ ctx }: { ctx: Ctx }) {
 /* ================================================================ ASK */
 type SR = { lang: string; interimResults: boolean; onresult: (e: { results: { 0: { transcript: string } }[] }) => void; onend: () => void; start: () => void; stop: () => void }
 
+const TOOL_IC: Record<string, string> = { find_place: '⌖', city_air: '◉', worst_air: '▲', hidden_hotspots: '◎', trace_sources: '↶',
+  sensitive_sites: '⛨', place_air: '⌖', simulate_measures: '⚖', draft_order: '✎' }
+
 export function AskDrawer({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
   const [q, setQ] = useState('')
-  const [msgs, setMsgs] = useState<{ role: 'u' | 'a'; text: string; model?: string | null }[]>([])
+  const [msgs, setMsgs] = useState<{ role: 'u' | 'a'; text: string; model?: string | null; steps?: CopilotStep[] }[]>([])
   const [busy, setBusy] = useState(false)
   const [listening, setListening] = useState(false)
   const [voiceLang, setVoiceLang] = useState('en-IN')
@@ -993,11 +1014,19 @@ export function AskDrawer({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
   useEffect(() => () => { srRef.current?.stop() }, [])
   const SRClass = (window as unknown as { SpeechRecognition?: new () => SR; webkitSpeechRecognition?: new () => SR }).SpeechRecognition
     ?? (window as unknown as { webkitSpeechRecognition?: new () => SR }).webkitSpeechRecognition
+  const elapsed = useElapsed(busy)
   async function send(text: string) {
-    if (!text.trim()) return
+    if (!text.trim() || busy) return
+    const history = [...msgs, { role: 'u' as const, text }].slice(-8).map((m) => ({ role: m.role === 'u' ? 'user' as const : 'assistant' as const, text: m.text }))
     setMsgs((m) => [...m, { role: 'u', text }]); setQ(''); setBusy(true)
-    try { const r = await api.ask(text, ctx.selectedCity ?? undefined); setMsgs((m) => [...m, { role: 'a', text: r.answer, model: r.model }]) }
-    catch { setMsgs((m) => [...m, { role: 'a', text: 'Sorry — I could not reach the assistant.' }]) } finally { setBusy(false) }
+    try {
+      const r = await api.copilot(history)
+      setMsgs((m) => [...m, { role: 'a', text: r.answer, model: r.model, steps: r.steps }])
+      ctx.runActions(r.actions)  // the globe follows the agent: fly, open Detect, Protect, the draft order…
+    } catch {
+      try { const r = await api.ask(text, ctx.selectedCity ?? undefined); setMsgs((m) => [...m, { role: 'a', text: r.answer, model: r.model }]) }
+      catch { setMsgs((m) => [...m, { role: 'a', text: 'Sorry — I could not reach the assistant.' }]) }
+    } finally { setBusy(false) }
   }
   function listen() {
     if (!SRClass) return
@@ -1007,17 +1036,24 @@ export function AskDrawer({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
     sr.onend = () => setListening(false)
     srRef.current = sr; sr.start(); setListening(true)
   }
-  const samples = ['दिल्ली में कल हवा कैसी रहेगी?', 'Which cities in the world are heading into unhealthy air this week?', 'சென்னையில் குழந்தைகள் வெளியே விளையாடலாமா?', '¿Cómo está el aire en Ciudad de México hoy?']
+  const samples = ['Which schools in Delhi should keep children indoors tomorrow? Draft a notice to principals in Hindi.',
+    'Where is the smoke over Lahore coming from, and what would cut it fastest?', 'Show me unmonitored fires in India right now.',
+    'சென்னையில் குழந்தைகள் இன்று வெளியே விளையாடலாமா?', '¿Cómo está el aire en Ciudad de México hoy?']
   return (
     <div className="ask glass fade-up" role="dialog" aria-label="Ask Albedo">
       <div className="sec-h" style={{ padding: '14px 16px 0' }}>
-        <div><div className="eyebrow">✦ Ask Albedo</div><div className="muted" style={{ fontSize: 12 }}>Any language · type or speak</div></div>
+        <div><div className="eyebrow">✦ Albedo Copilot</div><div className="muted" style={{ fontSize: 12 }}>Asks the live data, then acts on the map · any language · type or speak</div></div>
         <button className="x" onClick={onClose} aria-label="Close">×</button>
       </div>
       <div className="ask-body scroll-y" ref={body}>
         {!msgs.length && <div className="samples">{samples.map((s) => <button key={s} onClick={() => send(s)}>{s}</button>)}</div>}
         {msgs.map((m, i) => (
           <div key={i} className={`msg ${m.role}`}>
+            {!!m.steps?.length && (
+              <div className="cop-steps">
+                {m.steps.map((s, k) => <div key={k} className={`cop-step ${s.ok ? '' : 'bad'}`}><span className="mono">{TOOL_IC[s.tool] ?? '•'} {s.tool.replace(/_/g, ' ')}</span><span>{s.summary}</span></div>)}
+              </div>
+            )}
             <div dangerouslySetInnerHTML={{ __html: mdLite(m.text) }} />
             {m.role === 'a' && (
               <div className="msg-foot">
@@ -1027,7 +1063,7 @@ export function AskDrawer({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
             )}
           </div>
         ))}
-        {busy && <div className="msg a"><div className="typing"><i /><i /><i /></div></div>}
+        {busy && <div className="msg a"><div className="typing"><i /><i /><i /></div><div className="muted mono" style={{ fontSize: 11, marginTop: 6 }}>{elapsed < 4 ? 'planning' : elapsed < 12 ? 'calling Albedo-Watch tools' : elapsed < 30 ? 'reading live data' : 'drafting'} · {elapsed}s</div></div>}
       </div>
       <form className="ask-in" onSubmit={(e) => { e.preventDefault(); send(q) }}>
         {SRClass && (<>

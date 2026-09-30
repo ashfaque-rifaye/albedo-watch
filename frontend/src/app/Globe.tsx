@@ -48,6 +48,8 @@ export type GlobeProps = {
   haze: number | null
   /** A place a live notification is about: rings pulse there for a few seconds */
   ping: { lat: number; lon: number; t0: number } | null
+  /** Schools (0) and hospitals/clinics (1) for Protect: [lat, lon, kind] */
+  sites: [number, number, number][] | null
   track: Track
   flyTo: FlyTarget | null
   onCity: (id: string) => void
@@ -268,7 +270,7 @@ export default function Globe(p: GlobeProps) {
     })
     for (const [k, c] of Object.entries({
       corridors: new Cesium.PolylineCollection(), traj: new Cesium.PolylineCollection(), arcs: new Cesium.PolylineCollection(),
-      fires: new Cesium.PointPrimitiveCollection(), sensors: new Cesium.PointPrimitiveCollection(),
+      fires: new Cesium.PointPrimitiveCollection(), sensors: new Cesium.PointPrimitiveCollection(), sites: new Cesium.PointPrimitiveCollection(),
       cityGlow: new Cesium.PointPrimitiveCollection(), cities: new Cesium.PointPrimitiveCollection(),
       labels: new Cesium.LabelCollection(), clusters: new Cesium.BillboardCollection(),
       hotspots: new Cesium.BillboardCollection(), reports: new Cesium.BillboardCollection(), hub: new Cesium.BillboardCollection(),
@@ -523,6 +525,18 @@ export default function Globe(p: GlobeProps) {
         id: { kind: 'station', label: `Official monitor · PM2.5 ${pm} µg/m³ · ${age} min ago (OpenAQ reference monitor)` } as Tag })
     }
   }, [p.citizen, p.stations, p.layers.sensors, ready, gOffV]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const s = coll.current.sites as Cesium.PointPrimitiveCollection
+    if (!s) return
+    s.removeAll()
+    const vis = new Cesium.DistanceDisplayCondition(0, 3.5e5)
+    for (const [lat, lon, k] of p.sites ?? []) {
+      s.add({ position: at(lon, lat, 6), pixelSize: k ? 6 : 5, color: col(k ? '#ff8fa3' : '#f7d36a', 0.95),
+        outlineColor: col('#05070b', 0.8), outlineWidth: 1, distanceDisplayCondition: vis, disableDepthTestDistance: DDT,
+        id: { kind: 'sensor', label: k ? 'Hospital or clinic (OpenStreetMap)' : 'School, college or pre-school (OpenStreetMap)' } as Tag })
+    }
+  }, [p.sites, ready, gOffV]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const b = coll.current.hotspots as Cesium.BillboardCollection

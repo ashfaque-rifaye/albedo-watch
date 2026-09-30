@@ -152,3 +152,25 @@ def test_hotspots_are_graded(client):
         assert h["confidence"] in ("high", "medium", "low")
         assert h["fires"] >= 3 or h["frp"] >= 40 or h["reports"]
         assert h["image"]["url"].startswith("https://")
+
+
+def test_simulate_values_health(client):
+    r = client.post("/api/simulate", json={"city": "delhi", "measures": ["cnd_ban", "road_dust"], "compliance": 0.8}).json()
+    h = r["health"]
+    assert h["deaths_avoided"] >= 0 and h["admissions_avoided"] >= 0 and h["currency"] == "₹"
+
+
+def test_protect_city_windows(client):
+    r = client.get("/api/protect/city/delhi").json()
+    assert set(r["windows_text"]) == {"outdoor_ok", "stay_indoors"}
+    assert r["radius_km"] <= 12
+
+
+def test_live_feed_and_push_guard(client):
+    assert isinstance(client.get("/api/live").json()["items"], list)
+    assert client.post("/api/push/run").status_code == 403
+
+
+def test_copilot_always_answers(client):
+    r = client.post("/api/copilot", json={"messages": [{"role": "user", "text": "How is the air in Delhi?"}]})
+    assert r.status_code == 200 and r.json()["answer"]

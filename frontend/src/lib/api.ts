@@ -113,10 +113,11 @@ export type Commons = { summary: CommonsSummary; rounds: { round: number; mae: n
 export type SimResult = {
   pm25_before: number; pm25_after: number; reduction: number; reduction_pct: number; naqi_before: number; naqi_after: number
   category_before: Cat; category_after: Cat; measures: { id: string; label: string; owner: string; lead_h: number; ugm3: number; exposure_only: boolean }[]
-  compliance: number; people_benefiting_m: number; risk_reduction_pct: number; caveat: string
+  compliance: number; people_benefiting_m: number; risk_reduction_pct: number; caveat: string; health?: HealthValue
 }
 export type Measure = { id: string; label: string; grap: number; owner: string; lead_h: number; cost: string; cuts: Record<string, number> }
 export type Meta = {
+  vapid_public_key?: string | null
   product: string; model: string; store: string; languages: Record<string, string>; maps_browser_key?: string | null
   states: Record<string, { name: string; languages: string[]; authority: string }>
   country_languages?: Record<string, string[]>
@@ -126,10 +127,19 @@ export type Meta = {
 
 export type LiveEvent = { id: string; kind: 'spike' | 'fire' | 'report' | 'alert' | 'feed'; t: number; severity: number; title: string; sub: string
   lat?: number; lon?: number; city?: string; report?: string; alert?: string; country?: string | null }
+export type ProtectSite = { name: string; group: 'school' | 'health'; type: string; lat: number; lon: number; km: number; eta_h?: number }
+export type ProtectData = { city?: string; name?: string; radius_km: number; index_system: string; now: number; peak72: number
+  schools: number; health: number; total: number; counts: Record<string, number>; top: ProtectSite[]; points: [number, number, number][]
+  windows_text?: { outdoor_ok: string[]; stay_indoors: string[] }; source: string }
+export type CopilotStep = { tool: string; args: Record<string, unknown>; summary: string; ms: number; ok: boolean }
+export type CopilotAction = { type: 'fly' | 'city' | 'mode' | 'place' | 'protect' | 'alert' | 'detect'; lat?: number; lon?: number; range?: number
+  id?: string; mode?: string; city?: string; scope?: 'india' | 'world' }
+export type CopilotReply = { answer: string; steps: CopilotStep[]; actions: CopilotAction[]; model?: string | null; fallback?: boolean; partial?: boolean }
+export type HealthValue = { days: number; delta_pm25: number; deaths_avoided: number; admissions_avoided: number; value: number; currency: string; unit: string; method: string }
 export type LiveItem = { id: string; kind: 'citizen' | 'news' | 'satellite'; t: number; title: string; image: string; source: string
   lat: number; lon: number; place: string; url?: string; report?: string; country?: string | null }
 export type DraftBody = { kind: 'city' | 'hotspot' | 'report' | 'place'; city?: string; report_id?: string; lat?: number; lon?: number
-  languages?: string[]; attach_imagery?: boolean; label?: string; suggested?: string[] }
+  languages?: string[]; attach_imagery?: boolean; label?: string; suggested?: string[]; audience?: 'authority' | 'schools' | 'hospitals' | 'public' }
 
 async function req<T>(path: string, init?: RequestInit, timeoutMs = 60000): Promise<T> {
   const ctl = new AbortController()
@@ -157,6 +167,11 @@ export const api = {
   timeline: () => req<{ frames: { h: number; t: number; naqi: Record<string, number | null>; level: Record<string, number> }[] }>('/api/timeline'),
   overview: () => req<Overview>('/api/overview', undefined, 30000),
   sensors: () => req<Sensors>('/api/sensors'),
+  protectCity: (id: string) => req<ProtectData>(`/api/protect/city/${id}`, undefined, 60000),
+  copilot: (messages: { role: 'user' | 'assistant'; text: string }[]) => post<CopilotReply>('/api/copilot', { messages }, 115000),
+  pushSubscribe: (body: { subscription: { endpoint: string; keys: { p256dh: string; auth: string } }; lat: number; lon: number; profile: string; label: string }) =>
+    post<{ id: string; ok: boolean }>('/api/push/subscribe', body, 20000),
+  pushTest: (endpoint: string) => post<{ sent: boolean }>('/api/push/test', { endpoint }, 30000),
   live: () => req<{ items: LiveItem[] }>('/api/live', undefined, 40000),
   events: (country?: string | null) => req<{ events: LiveEvent[] }>(`/api/events${country ? `?country=${country}` : ''}`),
   place: (lat: number, lon: number) => req<PlaceIntel>(`/api/place?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}`, undefined, 60000),

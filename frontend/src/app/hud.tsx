@@ -70,12 +70,12 @@ export function Hud({ lens, setLens, feeds, trackLabel, onStopTrack }: {
 type CoachStep = { sel: string | null; title: string; text: React.ReactNode }
 export const COACH_STEPS: CoachStep[] = [
   { sel: null, title: 'Earth\'s air, live', text: <>Every mark on this globe is live data: air quality for 230 cities, NASA fire detections, 9,000+ citizen sensors and today's winds. <b>Drag</b> to spin, <b>scroll or pinch</b> to zoom, and <b>click anywhere</b> to see the air at that exact spot.</> },
-  { sel: '.mc-modes', title: 'Seven tools', text: <><b>Pulse</b>: air now, worldwide and near you · <b>Detect</b>: pollution no official monitor is watching · <b>Trace</b>: where a city's smoke comes from · <b>Citizen</b>: report with a photo or voice note · <b>Forecast</b>: the next 72 h · <b>Command</b>: draft official alerts in local languages · <b>Accuracy</b>: how the forecasts learn from local sensors.</> },
+  { sel: '.mc-modes', title: 'Eight tools', text: <><b>Pulse</b>: air now, worldwide and near you · <b>Detect</b>: pollution no official monitor is watching · <b>Trace</b>: where a city's smoke comes from, and what cutting it is worth · <b>Citizen</b>: report with a photo or voice note · <b>Forecast</b>: the next 72 h · <b>Protect</b>: schools and hospitals in the smoke · <b>Command</b>: draft official orders in local languages · <b>Accuracy</b>: how the forecasts learn from local sensors.</> },
   { sel: '.country-select', title: 'Your country', text: 'Filter every list, alert and live event to one country, or keep the whole world.' },
-  { sel: '.view-btns', title: 'Your hub & shortcuts', text: <><b>⌖</b> finds your location and makes it your home hub · <b>◷</b> replays the 72-hour forecast · <b>▶</b> takes a guided flight · <b>?</b> shows this tour again.</> },
+  { sel: '.view-btns', title: 'Your hub & shortcuts', text: <><b>⌖</b> finds your location and makes it your home hub, with your personal air plan and alerts · <b>◷</b> replays the 72-hour forecast · <b>▶</b> takes a guided flight · <b>◉</b> turns live picture reports on or off · <b>?</b> shows this tour again.</> },
   { sel: '.hud-lenses', title: 'Satellite lenses', text: 'Swap in real NASA layers: HEAT (land-surface temperature), HAZE (aerosol from space) and NIGHT (city lights). TRUE returns to normal colour.' },
   { sel: '.mc-legend', title: 'Legend & layers', text: 'What every symbol means, plus switches for each data layer and the imagery style.' },
-  { sel: '.ask-btn', title: 'Ask anything', text: 'Ask in any language, e.g. "Is it safe to jog in Lucknow tomorrow morning?". Gemini answers from the live data.' },
+  { sel: '.ask-btn', title: 'Albedo Copilot', text: 'A Gemini agent that works the app for you, in any language: "Which schools in Delhi should keep children indoors tomorrow? Draft a notice in Hindi." It queries the live data, moves the map and prepares the order for an officer to approve.' },
 ]
 
 export function Coach({ onDone }: { onDone: () => void }) {

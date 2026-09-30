@@ -43,7 +43,10 @@ ALERT_SYSTEM = (
     "episode plan with WHO Air Quality Guidelines as reference elsewhere. Use only facts given in the context; cite "
     "numbers. Public advisories must be plain, calm and actionable for ordinary people, especially children, "
     "elderly, outdoor workers and people with asthma/heart disease. Write each advisory natively in its "
-    "language and script (not transliterated). Output JSON only."
+    "language and script (not transliterated). If the context names an 'audience' (e.g. school principals or "
+    "hospital administrators), address the order and advisories to them with concrete instructions tied to the "
+    "given local-time windows: when outdoor assembly, sports and recess are fine, when to keep children or "
+    "patients indoors, ventilation and masks. Output JSON only."
 )
 
 

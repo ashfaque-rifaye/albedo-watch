@@ -29,7 +29,7 @@
     },
     {
       "name": "app",
-      "runtimeExecutable": "python",
+      "runtimeExecutable": "backend/.venv/Scripts/python.exe",
       "runtimeArgs": [
         "-m",
         "uvicorn",
