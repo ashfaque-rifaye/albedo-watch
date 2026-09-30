@@ -3,7 +3,7 @@
 * city series   — CAMS composition + NWP met for every registry city (hourly, −72 h … +96 h)
 * wind field    — 2.5° wind lattice over the subcontinent, interpolated in space & time
 * fires         — NASA FIRMS VIIRS detections, last 48 h
-* truth         — Google AQ station-fused PM2.5 history for federated ground-truth sites
+* truth         — OpenAQ reference-monitor PM2.5 (hourly) for federated ground-truth sites
 """
 from __future__ import annotations
 
@@ -15,9 +15,11 @@ import time
 from dataclasses import dataclass
 
 from ..config import settings
-from ..geo import wind_uv
+import httpx
+
+from ..geo import haversine_km, wind_uv
 from ..registry import CITIES, CITY_BY_ID
-from ..sources import cache, firms, google, openmeteo, sensors
+from ..sources import cache, firms, openmeteo, sensors
 
 log = logging.getLogger("albedo.hub")
 
@@ -176,18 +178,42 @@ TRUTH_CITIES = [c for c in CITIES if c.truth]
 
 
 async def _fetch_truth() -> dict[str, dict[int, float]]:
-    sem = asyncio.Semaphore(6)
+    """Ground truth for the federated models: hourly PM2.5 from the nearest OpenAQ
+    reference monitors (≤ 25 km, up to two per city, median per hour).
 
-    async def one(c):
-        async with sem:
-            try:
-                return c.id, await google.aq_history(c.lat, c.lon, 72)
-            except Exception as exc:
-                log.warning("truth %s failed (%s)", c.id, type(exc).__name__)
-                return c.id, {}
+    Google Air Quality data is deliberately not used here: the Google Maps Platform
+    Terms forbid using Google Maps Content to train, test or validate models."""
+    if not settings.openaq_api_key:
+        raise RuntimeError("no OpenAQ key: no ground truth")
+    # reference sites that reported in the last 3 days (India's feed on OpenAQ can lag by a day)
+    recent = time.time() - 3 * 86400
+    sites = [x for x in await monitor_sites() if x.get("sids") and x.get("t", 0) >= recent]
+    sem = asyncio.Semaphore(2)
+    headers = {"X-API-Key": settings.openaq_api_key, "User-Agent": "Albedo-Watch/1.0"}
 
-    pairs = await asyncio.gather(*(one(c) for c in TRUTH_CITIES))
-    got = {k: v for k, v in pairs if v}
+    async with httpx.AsyncClient(timeout=30, headers=headers) as client:
+        async def one(c):
+            near = sorted((haversine_km(c.lat, c.lon, x["lat"], x["lon"]), x["sids"]) for x in sites
+                          if abs(x["lat"] - c.lat) < 0.3 and abs(x["lon"] - c.lon) < 0.3)
+            per_hour: dict[int, list[float]] = {}
+            for d, sids in [n for n in near if n[0] <= 25][:2]:
+                for sid in sids[:2]:  # a site can list a retired PM2.5 sensor first
+                    async with sem:
+                        try:
+                            got = await sensors.openaq_hours(client, sid, 96)
+                        except Exception as exc:
+                            log.warning("truth %s/%s failed (%s)", c.id, sid, type(exc).__name__)
+                            got = {}
+                        await asyncio.sleep(0.4)
+                    for t, v in got.items():
+                        per_hour.setdefault(t, []).append(v)
+                    if got:
+                        break
+            return c.id, {t: sorted(v)[len(v) // 2] for t, v in per_hour.items()}
+
+        pairs = await asyncio.gather(*(one(c) for c in TRUTH_CITIES))
+    got = {k: v for k, v in pairs if len(v) >= 24}
+    log.info("ground truth: %d of %d cities have ≥24 h of OpenAQ reference data", len(got), len(TRUTH_CITIES))
     if not got:
         raise RuntimeError("no ground truth available")
     return got

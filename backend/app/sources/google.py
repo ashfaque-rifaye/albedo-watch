@@ -1,9 +1,22 @@
-"""Google Maps Platform: Air Quality history (station-fused ground truth for the
-federated correction models) and reverse geocoding (report jurisdiction)."""
+"""Google Maps Platform (server side): Air Quality current conditions and Street View metadata.
+
+How Albedo-Watch stays inside the Google Maps Platform Terms:
+* Air Quality values are only shown to the person who asked, beside a Google
+  basemap, with Google attribution; they are cached for at most one hour
+  (Service Specific Terms 2.2) and never used to train or test a model
+  (Terms 3.2.3(c)(vii)), never passed to Gemini, and never read aloud by TTS
+  (3.2.3(a)(iv)). The federated models learn from OpenAQ reference monitors.
+* Street View is shown only through the Maps Embed API; the backend asks for
+  metadata to pick an outdoor Google panorama and keeps only its pano ID,
+  which the terms allow to be stored. No Street View image is fetched,
+  proxied or stored.
+* Geocoding uses OpenStreetMap (see ``nominatim.py``).
+* Coordinates are rounded to ~100 m before they are sent, so no precise
+  personal location leaves the server.
+"""
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 
 import httpx
 
@@ -11,97 +24,20 @@ from ..config import settings
 
 log = logging.getLogger("albedo.google")
 
-AQ_HISTORY = "https://airquality.googleapis.com/v1/history:lookup"
-GEOCODE = "https://maps.googleapis.com/maps/api/geocode/json"
-
-
-async def aq_history(lat: float, lon: float, hours: int = 72) -> dict[int, float]:
-    """{unix_hour: pm2.5 µg/m³} for the past ``hours``."""
-    key = settings.maps_server_key
-    if not key:
-        return {}
-    body = {
-        "hours": hours, "pageSize": hours,
-        "location": {"latitude": lat, "longitude": lon},
-        "extraComputations": ["POLLUTANT_CONCENTRATION"],
-        "universalAqi": False,
-    }
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(AQ_HISTORY, params={"key": key}, json=body)
-    if r.status_code != 200:
-        log.warning("google aq history HTTP %s", r.status_code)
-        return {}
-    out: dict[int, float] = {}
-    for h in r.json().get("hoursInfo", []):
-        try:
-            ts = int(datetime.fromisoformat(h["dateTime"].replace("Z", "+00:00")).timestamp())
-            for p in h.get("pollutants", []):
-                if p.get("code") == "pm25":
-                    out[ts] = float(p["concentration"]["value"])
-        except (KeyError, ValueError, TypeError):
-            continue
-    return out
-
-
-async def forward_geocode(query: str) -> dict:
-    """Name or address → coordinates (Google Geocoding)."""
-    key = settings.maps_server_key
-    if not key or settings.offline:
-        return {}
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(GEOCODE, params={"address": query[:200], "key": key})
-        res = (r.json().get("results") or [None])[0]
-    except Exception:
-        return {}
-    if not res:
-        return {}
-    loc = res["geometry"]["location"]
-    cc = next((c["short_name"] for c in res.get("address_components", []) if "country" in c.get("types", [])), None)
-    return {"lat": round(loc["lat"], 5), "lon": round(loc["lng"], 5), "address": res.get("formatted_address"), "country": cc}
-
-
-async def reverse_geocode(lat: float, lon: float) -> dict:
-    key = settings.maps_server_key
-    if not key or settings.offline:
-        return {}
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(GEOCODE, params={"latlng": f"{lat},{lon}", "key": key,
-                                                  "result_type": "locality|administrative_area_level_3|administrative_area_level_2"})
-        results = r.json().get("results", [])
-    except Exception:
-        return {}
-    info: dict[str, str] = {}
-    for res in results[:3]:
-        for comp in res.get("address_components", []):
-            t = comp.get("types", [])
-            if "locality" in t:
-                info.setdefault("locality", comp["long_name"])
-            if "administrative_area_level_3" in t:
-                info.setdefault("subdistrict", comp["long_name"])
-            if "administrative_area_level_2" in t:
-                info.setdefault("district", comp["long_name"])
-            if "administrative_area_level_1" in t:
-                info.setdefault("state", comp["long_name"])
-            if "country" in t:
-                info.setdefault("country", comp["short_name"])
-        if res.get("formatted_address"):
-            info.setdefault("address", res["formatted_address"])
-    return info
-
-
 AQ_CURRENT = "https://airquality.googleapis.com/v1/currentConditions:lookup"
 SV_META = "https://maps.googleapis.com/maps/api/streetview/metadata"
-SV_IMAGE = "https://maps.googleapis.com/maps/api/streetview"
+
+
+def _r(v: float) -> float:
+    return round(v, 3)
 
 
 async def aq_current(lat: float, lon: float) -> dict:
-    """Live station-fused conditions incl. the country's official local index."""
+    """Live conditions incl. the country's official local index (display only)."""
     key = settings.maps_server_key
     if not key or settings.offline:
         return {}
-    body = {"location": {"latitude": lat, "longitude": lon},
+    body = {"location": {"latitude": _r(lat), "longitude": _r(lon)},
             "extraComputations": ["LOCAL_AQI", "POLLUTANT_CONCENTRATION", "HEALTH_RECOMMENDATIONS",
                                   "DOMINANT_POLLUTANT_CONCENTRATION"], "languageCode": "en"}
     try:
@@ -117,7 +53,8 @@ async def aq_current(lat: float, lon: float) -> dict:
     pol = {p["code"]: {"name": p.get("displayName"), "value": p.get("concentration", {}).get("value"),
                        "units": p.get("concentration", {}).get("units")} for p in d.get("pollutants", [])}
     return {"time": d.get("dateTime"), "region": d.get("regionCode"), "indexes": idx, "pollutants": pol,
-            "health": d.get("healthRecommendations", {}).get("generalPopulation")}
+            "health": d.get("healthRecommendations", {}).get("generalPopulation"),
+            "attribution": "Air quality data: Google Maps"}
 
 
 def _rgb(c: dict | None) -> str | None:
@@ -127,9 +64,11 @@ def _rgb(c: dict | None) -> str | None:
 
 
 async def streetview_meta(lat: float, lon: float, radius: int = 1000) -> dict:
+    """Metadata for the nearest outdoor panorama (free; the pano ID may be stored)."""
     key = settings.maps_server_key
     if not key or settings.offline:
         return {}
+    lat, lon = _r(lat), _r(lon)
     # Prefer Google's own street imagery: "outdoor" still admits third-party photospheres
     # (often shop interiors), so nudge the search a few tens of metres until a © Google pano turns up.
     offsets = [(0, 0), (0.0006, 0), (-0.0006, 0), (0, 0.0006), (0, -0.0006), (0.0012, 0.0012), (-0.0012, -0.0012)]
@@ -148,16 +87,3 @@ async def streetview_meta(lat: float, lon: float, radius: int = 1000) -> dict:
         return first
     except Exception:
         return first
-
-
-async def streetview_image(lat: float, lon: float, heading: float | None = None, fov: int = 90) -> bytes | None:
-    """Live Street View frame. Never cached or stored (Google Maps Platform terms)."""
-    key = settings.maps_server_key
-    if not key:
-        return None
-    params = {"size": "640x400", "location": f"{lat},{lon}", "fov": fov, "radius": 1000, "source": "outdoor", "key": key}
-    if heading is not None:
-        params["heading"] = heading
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(SV_IMAGE, params=params)
-    return r.content if r.status_code == 200 and r.headers.get("content-type", "").startswith("image") else None

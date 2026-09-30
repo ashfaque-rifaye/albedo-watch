@@ -55,7 +55,7 @@ export type Overview = { summary: Pulse['summary'] | null; fires: FireSummary | 
 export type PlaceIntel = {
   lat: number; lon: number; fetched_at: number
   place: { address?: string; locality?: string; district?: string; state?: string; country: string; nearest_city: string; nearest_city_id: string; nearest_city_km: number }
-  google_aq: { time?: string; indexes?: { code: string; name: string; aqi: number; category: string; dominant: string; color: string | null }[]
+  google_aq?: { time?: string; indexes?: { code: string; name: string; aqi: number; category: string; dominant: string; color: string | null }[]
     pollutants?: Record<string, { name: string; value: number; units: string }>; health?: string }
   forecast: { now: { index?: number; system?: string; category?: Cat; pm25?: number; pm25_cams?: number; dominant?: string; peak72?: number; peak_time?: number; peak_category?: Cat; stage?: Grap }
     series: { time: number[]; index: (number | null)[]; level: number[]; pm25: (number | null)[]; now_offset: number } | null; source: string }
@@ -171,10 +171,12 @@ export const api = {
   copilot: (messages: { role: 'user' | 'assistant'; text: string }[]) => post<CopilotReply>('/api/copilot', { messages }, 115000),
   pushSubscribe: (body: { subscription: { endpoint: string; keys: { p256dh: string; auth: string } }; lat: number; lon: number; profile: string; label: string }) =>
     post<{ id: string; ok: boolean }>('/api/push/subscribe', body, 20000),
+  pushUnsubscribe: (endpoint: string) => post<{ ok: boolean }>('/api/push/unsubscribe', { endpoint }, 20000),
   pushTest: (endpoint: string) => post<{ sent: boolean }>('/api/push/test', { endpoint }, 30000),
   live: () => req<{ items: LiveItem[] }>('/api/live', undefined, 40000),
   events: (country?: string | null) => req<{ events: LiveEvent[] }>(`/api/events${country ? `?country=${country}` : ''}`),
-  place: (lat: number, lon: number) => req<PlaceIntel>(`/api/place?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}`, undefined, 60000),
+  /** google=false in the Open-data map mode: the response then holds no Google Maps content at all */
+  place: (lat: number, lon: number, google = true) => req<PlaceIntel>(`/api/place?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}&google=${google ? 1 : 0}`, undefined, 60000),
   corridors: () => req<{ corridors: Corridor[] }>('/api/corridors'),
   wind: (h = 0, scope: 'global' | 'india' = 'global') => req<{ vectors: WindVec[]; step: number }>(`/api/wind?h=${h}&scope=${scope}`),
   fires: (bbox?: [number, number, number, number]) => req<FireFeed>(bbox ? `/api/fires?bbox=${bbox.map((v) => v.toFixed(2)).join(',')}` : '/api/fires'),

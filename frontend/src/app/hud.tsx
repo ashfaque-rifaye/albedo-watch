@@ -13,6 +13,7 @@ export const LENSES: { id: Lens; label: string; hint: string; legend?: { title: 
     legend: { title: 'Land-surface temperature', stops: ['#3100ff', '#0094ff', '#49ff56', '#deff00', '#ff8000', '#ff0100'], ticks: ['−50', '−3', '21', '50', '≥77 °C'], src: 'NASA MODIS Terra · daily · 1 km' } },
   { id: 'haze', label: 'HAZE', hint: 'Aerosol optical depth from NASA MODIS: how much smoke, dust and haze the sunlight passes through',
     legend: { title: 'Aerosol optical depth (haze)', stops: ['#fffdcd', '#ffc94c', '#ff671c', '#d7090b', '#7d000e'], ticks: ['0 clear', '0.2', '0.4', '0.6', '≥1 thick'], src: 'NASA MODIS Aqua+Terra · daily · 2–3 days behind' } },
+  { id: 'today', label: 'TODAY', hint: "Yesterday's NASA VIIRS true-colour pass: smoke plumes, dust and haze as the satellite saw them" },
   { id: 'night', label: 'NIGHT', hint: 'Night lights (NASA Black Marble): where people, roads and industry are',
     legend: { title: 'Night lights', stops: ['#000000', '#1c2238', '#8a6d2f', '#ffd98a', '#ffffff'], ticks: ['dark', '', '', '', 'brightest'], src: 'NASA VIIRS Black Marble composite' } },
 ]
@@ -73,7 +74,7 @@ export const COACH_STEPS: CoachStep[] = [
   { sel: '.mc-modes', title: 'Eight tools', text: <><b>Pulse</b>: air now, worldwide and near you · <b>Detect</b>: pollution no official monitor is watching · <b>Trace</b>: where a city's smoke comes from, and what cutting it is worth · <b>Citizen</b>: report with a photo or voice note · <b>Forecast</b>: the next 72 h · <b>Protect</b>: schools and hospitals in the smoke · <b>Command</b>: draft official orders in local languages · <b>Accuracy</b>: how the forecasts learn from local sensors.</> },
   { sel: '.country-select', title: 'Your country', text: 'Filter every list, alert and live event to one country, or keep the whole world.' },
   { sel: '.view-btns', title: 'Your hub & shortcuts', text: <><b>⌖</b> finds your location and makes it your home hub, with your personal air plan and alerts · <b>◷</b> replays the 72-hour forecast · <b>▶</b> takes a guided flight · <b>◉</b> turns live picture reports on or off · <b>?</b> shows this tour again.</> },
-  { sel: '.hud-lenses', title: 'Satellite lenses', text: 'Swap in real NASA layers: HEAT (land-surface temperature), HAZE (aerosol from space) and NIGHT (city lights). TRUE returns to normal colour.' },
+  { sel: '.hud-lenses', title: 'Satellite lenses', text: 'Swap in real NASA layers: HEAT (land-surface temperature), HAZE (aerosol from space), TODAY (the latest satellite pass) and NIGHT (city lights). TRUE returns to normal colour.' },
   { sel: '.mc-legend', title: 'Legend & layers', text: 'What every symbol means, plus switches for each data layer and the imagery style.' },
   { sel: '.ask-btn', title: 'Albedo Copilot', text: 'A Gemini agent that works the app for you, in any language: "Which schools in Delhi should keep children indoors tomorrow? Draft a notice in Hindi." It queries the live data, moves the map and prepares the order for an officer to approve.' },
 ]

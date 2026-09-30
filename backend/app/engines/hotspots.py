@@ -21,7 +21,7 @@ import httpx
 from ..geo import haversine_km
 from ..registry import INDIA_CITIES
 from ..config import settings
-from ..sources import cache, gibs, google, openmeteo
+from ..sources import cache, gibs, nominatim, openmeteo
 from ..store import store
 from . import attribution, datahub
 
@@ -196,12 +196,12 @@ async def find(scope: str = "world", limit: int = 20) -> dict:
     top.sort(key=lambda h: -h["priority"])
     yday = dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=1)
     shown: list[dict] = []
-    for h in top:  # Google geocoding only for what we show, cached per 0.1°
+    for h in top:  # OpenStreetMap names only for what we show, cached per 0.1°
         if len(shown) >= limit:
             break
         key = (round(h["lat"] * 10), round(h["lon"] * 10))
         if key not in _geo_cache:
-            _geo_cache[key] = await google.reverse_geocode(h["lat"], h["lon"])
+            _geo_cache[key] = await nominatim.reverse(h["lat"], h["lon"])
         h["admin"] = _geo_cache[key]
         # The India view is India only: the bounding box also covers neighbours.
         country = h["admin"].get("country") or (h["place"].get("country") if h["place"].get("km", 999) < 150 else None)

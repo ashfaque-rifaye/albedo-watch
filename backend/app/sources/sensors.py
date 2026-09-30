@@ -83,7 +83,7 @@ async def fetch_openaq(max_pages: int = 40) -> list[dict]:
                 if t < cutoff or not (0 <= v <= 1000):
                     continue
                 out.append({"lat": round(c["latitude"], 4), "lon": round(c["longitude"], 4), "pm25": round(v, 1),
-                            "t": t, "id": x.get("locationsId")})
+                            "t": t, "id": x.get("locationsId"), "sid": x.get("sensorsId")})
             if len(res) < 1000:
                 break
             await asyncio.sleep(0.3)
@@ -122,10 +122,44 @@ async def fetch_openaq_monitors(max_pages: int = 40) -> list[dict]:
                     continue
                 if t < cutoff:
                     continue
+                sids = [z.get("id") for z in x.get("sensors") or [] if (z.get("parameter") or {}).get("id") == 2]
                 out.append({"id": x.get("id"), "lat": round(c["latitude"], 4), "lon": round(c["longitude"], 4),
-                            "name": x.get("name"), "cc": (x.get("country") or {}).get("code"), "t": t})
+                            "name": x.get("name"), "cc": (x.get("country") or {}).get("code"), "t": t, "sids": sids})
             if len(res) < 1000:
                 break
             await asyncio.sleep(0.3)
     log.info("OpenAQ: %d reference monitor sites active in the last 30 days", len(out))
     return out
+
+
+OPENAQ_HOURS = "https://api.openaq.org/v3/sensors/{sid}/hours"
+
+
+async def openaq_hours(client: httpx.AsyncClient, sid: int, hours: int = 96) -> dict[int, float]:
+    """{unix_hour: PM2.5 µg/m³} from one reference monitor's hourly averages.
+
+    OpenAQ periods can start on the half hour (India is UTC+5:30); each value is
+    filed under the UTC hour that contains the middle of its period.
+    """
+    now = int(time.time() // 3600 * 3600)
+    params = {"datetime_from": datetime.fromtimestamp(now - hours * 3600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "datetime_to": datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "limit": hours + 8}
+    for attempt in range(3):
+        r = await client.get(OPENAQ_HOURS.format(sid=sid), params=params)
+        if r.status_code == 429:
+            await asyncio.sleep(float(r.headers.get("x-ratelimit-reset", 5)) + 1)
+            continue
+        if r.status_code != 200:
+            return {}
+        out: dict[int, float] = {}
+        for x in r.json().get("results", []):
+            try:
+                a = datetime.fromisoformat(x["period"]["datetimeFrom"]["utc"].replace("Z", "+00:00")).timestamp()
+                b = datetime.fromisoformat(x["period"]["datetimeTo"]["utc"].replace("Z", "+00:00")).timestamp()
+                v = float(x["value"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if 0 <= v <= 1000:
+                out[int(((a + b) / 2) // 3600 * 3600)] = v
+        return out
+    return {}

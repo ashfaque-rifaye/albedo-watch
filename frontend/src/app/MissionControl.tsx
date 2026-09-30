@@ -35,11 +35,10 @@ export type City3D = {
  *  hygroscopic growth f(RH)) + Rayleigh 10 Mm⁻¹; Koschmieder visibility = 3.912 / b_ext. */
 export function hazeOf(i: PlaceIntel | null) {
   if (!i) return { pm25: null, rh: null, ext: null, vis_km: null, tint: null }
-  const pol = i.google_aq.pollutants ?? {}
-  const pmG = pol.pm25?.value ?? Object.values(pol).find((x) => /2\.5/.test(x.name ?? ''))?.value
-  const pm = pmG ?? i.forecast.now.pm25 ?? null
+  // our own corrected forecast, never Google content: the haze is content we create
+  const pm = i.forecast.now.pm25 ?? null
   const rh = i.weather.rh ?? 60
-  const tint = i.google_aq.indexes?.find((x) => x.code !== 'uaqi')?.color ?? i.forecast.now.category?.color ?? null
+  const tint = i.forecast.now.category?.color ?? null
   if (pm == null) return { pm25: null, rh, ext: null, vis_km: null, tint }
   const f = Math.min(4, Math.pow(1 - Math.min(95, Math.max(0, rh)) / 100, -0.55))
   const b = 3 * f * pm + 10
@@ -99,6 +98,8 @@ export type Ctx = {
   locateMe: () => void
   clearHub: () => void
   track: (lon: number, lat: number, label: string) => void
+  /** Google basemap on screen, so Google Maps content (live AQ, Street View, 3D tiles) may be shown */
+  googleOn: boolean
   /** Accuracy view: the regional federation shown on the globe ('All' = every federation) */
   fed: string
   setFed: (f: string) => void
@@ -172,6 +173,7 @@ export default function MissionControl() {
   const [sheet, setSheet] = useState<'peek' | 'half' | 'full' | 'open' | 'min'>(mobile ? 'peek' : 'open')
   const [tour, setTour] = useState<{ step: number; steps: { title: string; text: string; go: () => void }[] } | null>(null)
   const viewReq = useRef(0)
+  const googleOn = theme !== 'open' && !!(meta?.maps_browser_key || import.meta.env.VITE_GOOGLE_MAPS_KEY)
   const tourTimer = useRef<number | null>(null)
 
   const setMode = useCallback((m: Mode) => {
@@ -215,8 +217,9 @@ export default function MissionControl() {
   }, [hotScope])
 
   // saved hub: refresh its live readings
-  useEffect(() => { if (hub && !hub.intel) api.place(hub.lat, hub.lon).then((i) => setHub({ lat: hub.lat, lon: hub.lon, intel: i })).catch(() => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (hub && !hub.intel) api.place(hub.lat, hub.lon, theme !== 'open').then((i) => setHub({ lat: hub.lat, lon: hub.lon, intel: i })).catch(() => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => { if (!googleOn && city3d?.mode === 'photoreal') setCity3dRaw(null) }, [googleOn]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setLayers((l) => (l.corridors === (mode === 'forecast') ? l : { ...l, corridors: mode === 'forecast' }))
     if (mode === 'commons') setTrackT(null)
@@ -279,18 +282,18 @@ export default function MissionControl() {
   const exit3D = useCallback(() => setCity3dRaw(null), [])
   const enter3D = useCallback((lat: number, lon: number, o: { intel?: PlaceIntel | null; label?: string; mode?: 'model' | 'photoreal' } = {}) => {
     const india = lat > 6 && lat < 37.5 && lon > 68 && lon < 97.5
-    const m = o.mode ?? (india ? 'model' : 'photoreal')
+    const m = o.mode ?? (india || !googleOn ? 'model' : 'photoreal')
     const z = hazeOf(o.intel ?? null)
     const same = (c: City3D | null) => !!c && c.lat === lat && c.lon === lon
     setCity3dRaw({ lat, lon, label: o.label ?? '', mode: m, b: null, loading: m === 'model', err: null, haze: true, ...z })
     setTrackT({ lon, lat, label: o.label || 'city' })
     if (mobile) setSheet('peek')  // on a phone, give the 3D view the whole screen
     setFly({ lon, lat, range: m === 'model' ? 1150 : 950, pitch: -27, heading: 25, duration: 3, key: Date.now() })
-    if (!o.intel) api.place(lat, lon).then((i) => setCity3dRaw((c) => (same(c) ? { ...c!, ...hazeOf(i) } : c))).catch(() => {})
+    if (!o.intel) api.place(lat, lon, false).then((i) => setCity3dRaw((c) => (same(c) ? { ...c!, ...hazeOf(i) } : c))).catch(() => {})
     if (m === 'model') api.buildings(lat, lon, 750)
       .then((b) => setCity3dRaw((c) => (same(c) ? { ...c!, b, loading: false } : c)))
       .catch((e) => setCity3dRaw((c) => (same(c) ? { ...c!, loading: false, err: (e as Error).message } : c)))
-  }, [mobile])
+  }, [mobile, googleOn])
 
   const locateMe = useCallback(() => {
     if (!navigator.geolocation) { setError('Location is not available in this browser.'); return }
@@ -301,12 +304,12 @@ export default function MissionControl() {
       setHub({ lat, lon, intel: null }); setModeRaw('pulse'); setSelectedCity(null)
       setFly({ lon, lat, range: 22000, pitch: -45, key: Date.now() })
       try {
-        const i = await api.place(lat, lon); setHub({ lat, lon, intel: i })
+        const i = await api.place(lat, lon, theme !== 'open'); setHub({ lat, lon, intel: i })
         if (i.place.country) { setCountryRaw(i.place.country); try { localStorage.setItem('aw-country', i.place.country) } catch { /* */ } }
       } catch { /* keep hub without intel */ }
       setLocating(false)
     }, () => { setLocating(false); setError('Location permission denied — choose your country instead.') }, { timeout: 10000, enableHighAccuracy: false })
-  }, [])
+  }, [theme])
   const clearHub = useCallback(() => { setHub(null); try { localStorage.removeItem('aw-hub') } catch { /* */ } }, [])
   const track = useCallback((lon: number, lat: number, label: string) => { setTrackT({ lon, lat, label }); setFly({ lon, lat, range: 3500, pitch: -35, key: Date.now() }) }, [])
 
@@ -384,7 +387,7 @@ export default function MissionControl() {
     refreshReports, refreshAlerts, setCommons, reloadPulse, selectedReport, setSelectedReport, onHotspot, draftFor, setDraftFor,
     place, openPlace, layers, setLayers, country, setCountry, countries, hub, locating, locateMe, clearHub, track,
     city3d, enter3D, exit3D, setCity3d, protectCity, setSites, openAlertId, setOpenAlertId, runActions,
-    fed, setFed, netBusy, setNetBusy,
+    fed, setFed, netBusy, setNetBusy, googleOn,
   }
 
   const frame = replay && frameIdx != null ? frames[frameIdx] : null
@@ -397,9 +400,10 @@ export default function MissionControl() {
         gain: n.mae_cams > 0 ? Math.round((1 - n.mae_personalised / n.mae_cams) * 100) : null }))
     : null), [mode, commons, fed])
   const quiet = mode === 'commons'
+  const base: GlobeLayers = googleOn ? layers : { ...layers, photoreal: false, aq: false }  // no Google content on an open-data map
   const shownLayers: GlobeLayers = quiet
-    ? { ...layers, wind: false, fires: false, cities: false, hotspots: false, reports: false, sensors: false, corridors: false, photoreal: false }
-    : city3d?.mode === 'photoreal' ? { ...layers, photoreal: true } : layers
+    ? { ...base, wind: false, fires: false, cities: false, hotspots: false, reports: false, sensors: false, corridors: false, photoreal: false }
+    : city3d?.mode === 'photoreal' && googleOn ? { ...base, photoreal: true } : base
   const shownEvents = country ? events.filter((e) => !e.country || e.country === country) : events
   const cycleSheet = () => setSheet((s) => (mobile ? (s === 'peek' ? 'half' : s === 'half' ? 'full' : 'peek') : s === 'open' ? 'min' : 'open'))
 
@@ -417,7 +421,7 @@ export default function MissionControl() {
           layers={shownLayers}
           buildings={city3d?.mode === 'model' ? city3d.b : null} buildingTint={city3d?.tint ?? null}
           haze={city3d?.haze ? city3d.ext : null} ping={ping} sites={mode === 'protect' ? sites : null}
-          lens={lens} hud={hud} autoPhotoreal={!mobile} track={trackT} flyTo={fly}
+          lens={lens} hud={hud} autoPhotoreal={!mobile && googleOn} track={trackT} flyTo={fly}
           onCity={(id) => { selectCity(id, true); if (mode !== 'trace' && mode !== 'command') setMode('pulse') }}
           onHotspot={onHotspot}
           onReport={(id) => { setSelectedReport(id); setMode('citizen') }}
@@ -427,6 +431,7 @@ export default function MissionControl() {
         />
       </Suspense>
       <div className="vignette" />
+      <nav className="legal-links" aria-label="Legal"><a href="/terms" target="_blank" rel="noreferrer">Terms</a> · <a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></nav>
       {hud && <Hud lens={lens} setLens={setLens} feeds={feeds} trackLabel={trackT?.label ?? null} onStopTrack={() => setTrackT(null)} />}
 
       <header className="mc-top">
@@ -493,8 +498,9 @@ export default function MissionControl() {
 
       <div className={`mc-legend glass ${layersOpen || legendOpen ? 'open' : ''}`}>
         <div className="seg theme-seg" role="group" aria-label="Imagery">
-          {([['satellite', 'Satellite'], ['today', 'NASA today'], ['night', 'Night']] as const).map(([k, l]) => (
-            <button key={k} className={theme === k ? 'on' : ''} onClick={() => setTheme(k)}>{l}</button>
+          {([['satellite', 'Satellite', 'Google satellite imagery with Google labels'], ['dark', 'Dark', 'Google map, dark style'],
+            ['open', 'Open data', 'Esri and NASA imagery only: every Google feature is switched off']] as const).map(([k, l, tip]) => (
+            <button key={k} className={theme === k ? 'on' : ''} title={tip} onClick={() => setTheme(k)}>{l}</button>
           ))}
         </div>
         <div className="legend-tabs">

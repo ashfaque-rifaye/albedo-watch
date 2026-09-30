@@ -295,7 +295,8 @@ export default function Landing() {
       <footer className="lfoot">
         <div className="wrap lfoot-in">
           <div className="lbrand"><Logo size={26} /><Wordmark size={16} /></div>
-          <p>Prototype for Build with AI: Code for Communities (2nd ed.). Forecasts and attributions are model estimates, clearly labelled; not official CPCB bulletins. Data: CAMS via Open-Meteo, NASA FIRMS, Google Air Quality & Geocoding. Station counts approximate.</p>
+          <p>Prototype for Build with AI: Code for Communities (2nd ed.). Forecasts and attributions are model estimates, clearly labelled; not official CPCB bulletins. Data: CAMS via Open-Meteo, NASA FIRMS, OpenAQ, OpenStreetMap; maps and live air quality by Google Maps. Station counts approximate.</p>
+          <p className="lfoot-links"><a href="/terms">Terms of use</a> · <a href="/privacy">Privacy</a> · <a href="/app">Open the app</a></p>
         </div>
       </footer>
     </div>

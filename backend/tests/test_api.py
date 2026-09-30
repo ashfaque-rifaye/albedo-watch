@@ -174,3 +174,16 @@ def test_live_feed_and_push_guard(client):
 def test_copilot_always_answers(client):
     r = client.post("/api/copilot", json={"messages": [{"role": "user", "text": "How is the air in Delhi?"}]})
     assert r.status_code == 200 and r.json()["answer"]
+
+
+def test_open_data_place_view_has_no_google_content(client):
+    """Open-data map mode and everything the AI sees: no Google Maps content in the payload."""
+    p = client.get("/api/place", params={"lat": 28.63, "lon": 77.22, "google": 0}).json()
+    assert "google_aq" not in p and p["imagery"]["streetview"] == {"available": False}
+    assert p["forecast"]["now"] and "stations" in p
+    assert client.get("/api/streetview", params={"lat": 28.63, "lon": 77.22}).status_code == 404  # no image proxy
+
+
+def test_push_unsubscribe_is_idempotent(client):
+    r = client.post("/api/push/unsubscribe", json={"endpoint": "https://push.example/abc"})
+    assert r.status_code == 200 and r.json()["ok"] is True

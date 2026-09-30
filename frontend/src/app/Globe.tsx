@@ -3,9 +3,9 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import type { BuildingSet, City, Cluster, Corridor, Hotspot, Report, WindVec } from '../lib/api'
 
-export type Theme = 'satellite' | 'night' | 'today'
+export type Theme = 'satellite' | 'dark' | 'open'
 /** Real satellite products, not colour filters: true colour, land-surface heat, aerosol haze, night lights. */
-export type Lens = 'true' | 'heat' | 'haze' | 'night'
+export type Lens = 'true' | 'heat' | 'haze' | 'night' | 'today'
 export type GlobeLayers = {
   wind: boolean; fires: boolean; cities: boolean; hotspots: boolean; reports: boolean
   sensors: boolean; corridors: boolean; aq: boolean; photoreal: boolean; sunlight: boolean
@@ -62,6 +62,18 @@ export type GlobeProps = {
   onView: (bbox: [number, number, number, number] | null, height: number) => void
   onUserMove?: () => void
 }
+
+/** Google roadmap, dark: the "Dark" theme (Map Tiles API styles). */
+const DARK_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#0f1722' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#9aa8ba' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0b1118' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0a1b2c' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1c2735' }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#3a4a60' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+]
 
 export const LEVEL_COLORS = ['#2bb673', '#9ccc3a', '#f2c230', '#f08a24', '#e0452b', '#9b1c3a']
 let GOOGLE_KEY = (import.meta.env.VITE_GOOGLE_MAPS_KEY as string | undefined) || ''
@@ -182,6 +194,7 @@ export default function Globe(p: GlobeProps) {
   const sampler = useRef<ReturnType<typeof makeSampler>>(null)
   const particles = useRef<Particle[]>([])
   const arcs = useRef<Cesium.Cartesian3[][]>([])
+  const gProv = useRef<Record<string, Cesium.ImageryProvider>>({})
   const netHubs = useRef<{ lat: number; lon: number; name: string; n: number }[]>([])
   const tagOrder = useRef<City[]>([])
   const idle = useRef(true)
@@ -383,55 +396,59 @@ export default function Globe(p: GlobeProps) {
   }, [])
 
   // ---------------------------------------------------------------- imagery theme, HD tiles & lenses
+  // Google Maps Platform terms: Google map content may not sit beside a non-Google map. The two
+  // Google themes use Google's own tiles at every zoom (satellite + Google labels, or a dark Google
+  // roadmap). "Open data" uses Esri and NASA imagery and switches every Google feature off.
   useEffect(() => {
     const v = viewer.current; if (!v) return
     const gen = ++themeGen.current
-    const L = v.imageryLayers
-    L.removeAll()
+    const google = !!GOOGLE_KEY && p.theme !== 'open'
     const yday = day(1.5)
-    const labels = () => {
-      const lbl = new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-        maximumLevel: 19, credit: 'Boundaries & places © Esri' }), { maximumTerrainLevel: 12 })
-      lbl.alpha = 0.9
-      L.add(lbl)
+    const gp = async (k: string, o: Record<string, unknown>) => {
+      if (!gProv.current[k]) gProv.current[k] = (await Cesium.Google2DImageryProvider.fromUrl({ key: GOOGLE_KEY, language: 'en', region: 'IN', ...o } as never)) as unknown as Cesium.ImageryProvider
+      return gProv.current[k]
     }
-    if (p.theme === 'satellite') {
-      L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        maximumLevel: 19, credit: 'Imagery © Esri, Maxar, Earthstar Geographics' }))
-      // Google's own satellite tiles take over once you zoom into a region (sharper, newer).
-      if (GOOGLE_KEY) {
-        Cesium.Google2DImageryProvider.fromUrl({ key: GOOGLE_KEY, mapType: 'satellite', language: 'en', region: 'IN' })
-          .then((prov) => { if (gen === themeGen.current) L.add(new Cesium.ImageryLayer(prov as unknown as Cesium.ImageryProvider, { minimumTerrainLevel: 10 }), 1) })
-          .catch(() => { /* Esri stays */ })
+    ;(async () => {
+      let base: Cesium.ImageryProvider, labels: Cesium.ImageryProvider | null = null
+      if (google) {
+        try {
+          base = p.theme === 'dark' ? await gp('dark', { mapType: 'roadmap', styles: DARK_STYLE }) : await gp('sat', { mapType: 'satellite' })
+          if (p.theme === 'satellite') labels = await gp('labels', { overlayLayerType: 'layerRoadmap' })
+        } catch (e) {
+          console.warn('Google 2D tiles unavailable', e)
+          return
+        }
+      } else {
+        base = new Cesium.UrlTemplateImageryProvider({
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          maximumLevel: 19, credit: 'Imagery © Esri, Maxar, Earthstar Geographics' })
+        labels = new Cesium.UrlTemplateImageryProvider({
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+          maximumLevel: 19, credit: 'Boundaries & places © Esri' })
       }
-    } else if (p.theme === 'today') {
-      L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-        url: `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/${yday}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
-        maximumLevel: 9, credit: `NASA GIBS · VIIRS NOAA-20 true colour · ${yday}` }))
-    } else {
-      const base = L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', subdomains: ['a', 'b', 'c', 'd'],
-        maximumLevel: 18, credit: '© OpenStreetMap contributors © CARTO' }))
-      base.brightness = 1.25
-    }
-    const lens = p.lens === 'heat' ? { url: gibs('MODIS_Terra_Land_Surface_Temp_Day', day(1), 7), max: 7, a: 0.78, c: `NASA MODIS Terra land-surface temperature · ${day(1)}` }
-      : p.lens === 'haze' ? { url: gibs('MODIS_Combined_Value_Added_AOD', day(2.5), 6), max: 6, a: 0.74, c: `NASA MODIS aerosol optical depth · ${day(2.5)}` }
-      : p.lens === 'night' ? { url: gibs('VIIRS_Black_Marble', '2016-01-01', 8), max: 8, a: 1, c: 'NASA Black Marble night lights (VIIRS)' } : null
-    if (lens) {
-      const l = L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url: lens.url, maximumLevel: lens.max, credit: lens.c }))
-      l.alpha = lens.a
-    }
-    if (p.theme !== 'night') labels()
-    if (p.layers.aq && GOOGLE_KEY) {
-      const aq = L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-        url: `https://airquality.googleapis.com/v1/mapTypes/UAQI_RED_GREEN/heatmapTiles/{z}/{x}/{y}?key=${GOOGLE_KEY}`,
-        maximumLevel: 12, credit: 'Air quality heatmap © Google' }))
-      aq.alpha = 0.55
-    }
-    v.scene.globe.enableLighting = p.layers.sunlight && p.theme !== 'night' && p.lens !== 'night'
-    v.scene.globe.dynamicAtmosphereLighting = v.scene.globe.enableLighting
+      if (gen !== themeGen.current) return
+      const L = v.imageryLayers
+      L.removeAll(false)
+      L.addImageryProvider(base)
+      const lens = p.lens === 'heat' ? { url: gibs('MODIS_Terra_Land_Surface_Temp_Day', day(1), 7), max: 7, a: 0.78, c: `NASA MODIS Terra land-surface temperature · ${day(1)}` }
+        : p.lens === 'haze' ? { url: gibs('MODIS_Combined_Value_Added_AOD', day(2.5), 6), max: 6, a: 0.74, c: `NASA MODIS aerosol optical depth · ${day(2.5)}` }
+        : p.lens === 'night' ? { url: gibs('VIIRS_Black_Marble', '2016-01-01', 8), max: 8, a: google ? 0.82 : 1, c: 'NASA Black Marble night lights (VIIRS)' }
+        : p.lens === 'today' ? { url: `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/${yday}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`, max: 9, a: 0.88, c: `NASA GIBS · VIIRS NOAA-20 true colour · ${yday}` }
+        : null
+      if (lens) {
+        const l = L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url: lens.url, maximumLevel: lens.max, credit: lens.c }))
+        l.alpha = lens.a
+      }
+      if (labels) { const l = L.add(new Cesium.ImageryLayer(labels, { maximumTerrainLevel: google ? undefined : 12 })); void l }
+      if (google && p.layers.aq) {
+        const aq = L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+          url: `https://airquality.googleapis.com/v1/mapTypes/UAQI_RED_GREEN/heatmapTiles/{z}/{x}/{y}?key=${GOOGLE_KEY}`,
+          maximumLevel: 12, credit: 'Air quality heatmap: Google Maps' }))
+        aq.alpha = 0.55
+      }
+      v.scene.globe.enableLighting = p.layers.sunlight && p.theme !== 'dark' && p.lens !== 'night'
+      v.scene.globe.dynamicAtmosphereLighting = v.scene.globe.enableLighting
+    })()
   }, [p.theme, p.lens, p.layers.aq, p.layers.sunlight, ready])
 
   useEffect(() => { if (ready) ensureTileset(p.layers.photoreal && !p.buildings) }, [p.layers.photoreal, p.buildings, ready]) // eslint-disable-line react-hooks/exhaustive-deps

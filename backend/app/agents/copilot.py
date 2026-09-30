@@ -18,7 +18,7 @@ from ..engines import health as health_value
 from ..engines import place, protect
 from ..llm.gemini_provider import GeminiProvider
 from ..registry import CITIES, CITY_BY_ID
-from ..sources import cache, google
+from ..sources import cache, nominatim
 
 log = logging.getLogger("albedo.copilot")
 
@@ -27,8 +27,8 @@ Work like an analyst on duty:
 1. Use the tools to get facts. Never invent a number, place or time; if a tool returns nothing, say so.
 2. Chain tools when the question needs it (e.g. find the city -> forecast -> schools -> draft a notice).
 3. Answer in the user's language and script. Be concise: a short paragraph or a few bullets with concrete numbers,
-   local times and places. Mention the evidence (CAMS forecast corrected by the federated model, Google Air Quality,
-   NASA FIRMS, OpenAQ monitors, OpenStreetMap).
+   local times and places. Mention the evidence (CAMS forecast corrected by the federated model, OpenAQ reference monitors,
+   NASA FIRMS, OpenStreetMap).
 4. When asked to act (order, notice, advisory, alert), call draft_order — with audience "schools" when the user means
    principals or schools, "hospitals" for hospitals — and the requested languages. Say that a human officer must approve it
    before anything is sent.
@@ -52,7 +52,7 @@ DECLS: list[dict] = [
      "parameters": {"type": "OBJECT", "properties": {"city_id": {"type": "STRING"}}, "required": ["city_id"]}},
     {"name": "sensitive_sites", "description": "Schools, colleges, hospitals and clinics in a city (OpenStreetMap) with safe outdoor hours and hours to stay indoors.",
      "parameters": {"type": "OBJECT", "properties": {"city_id": {"type": "STRING"}}, "required": ["city_id"]}},
-    {"name": "place_air", "description": "Live air quality measured at an exact point (Google Air Quality), local forecast, nearby fires and sensors.",
+    {"name": "place_air", "description": "Air at an exact point: corrected forecast, nearest official reference monitors (OpenAQ), nearby fires and citizen sensors.",
      "parameters": {"type": "OBJECT", "properties": {"lat": {"type": "NUMBER"}, "lon": {"type": "NUMBER"}}, "required": ["lat", "lon"]}},
     {"name": "simulate_measures", "description": "What a package of response measures would do to a city's PM2.5, with health and money value. "
                                                  f"Measure ids: {', '.join(MEASURES)}.",
@@ -105,7 +105,7 @@ class Session:
             c = CITY_BY_ID[rid]
             self.actions.append({"type": "fly", "lat": c.lat, "lon": c.lon, "range": 260000})
             return {"city_id": rid, "name": c.name, "country": c.country, "lat": c.lat, "lon": c.lon}
-        g = await google.forward_geocode(query)
+        g = await nominatim.search(query)
         if not g:
             return {"error": f"could not find '{query}'"}
         near, km = place._nearest_city(g["lat"], g["lon"])
@@ -172,11 +172,9 @@ class Session:
                 "examples": [f"{x['name']} ({x['type']}, {x['km']} km)" for x in pr["top"][:8]], "source": "OpenStreetMap"}
 
     async def place_air(self, lat: float, lon: float) -> dict:
-        p = await place.intel(lat, lon)
-        g = p.get("google_aq") or {}
+        p = await place.intel(lat, lon)  # open data only: Google Maps content never goes to the model
         self.actions.append({"type": "place", "lat": lat, "lon": lon})
-        return {"place": p["place"], "google_air_quality": [{"index": i["name"], "value": i["aqi"], "category": i["category"]}
-                                                           for i in g.get("indexes", [])],
+        return {"place": p["place"], "reference_monitors_25km": p["stations"]["nearest"][:3],
                 "forecast": p["forecast"]["now"], "weather": p["weather"],
                 "fires_within_50km": p["fires"]["within_50km"], "citizen_sensors_10km": p["citizen_sensors"]["count"]}
 

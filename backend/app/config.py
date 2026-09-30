@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     cerebras_api_key: str = ""
     cerebras_model: str = "gpt-oss-120b"
 
-    # Google Maps Platform — server key: Air Quality history (ground truth), Geocoding
+    # Google Maps Platform — server key: Air Quality current conditions + Street View metadata (display only)
     google_maps_api_key: str = ""
     # Browser key (referrer-restricted: 3D Tiles, Air Quality heatmap). Public by nature; served to the SPA.
     google_browser_key: str = ""

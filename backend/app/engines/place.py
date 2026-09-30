@@ -2,6 +2,11 @@
 
 Used by the 3D "God's-eye" drill-down and by alerts for any location on Earth.
 Nothing here is invented: each block carries its source and timestamp.
+
+``intel`` holds only open data (CAMS, NASA, OpenAQ, Sensor.Community, OSM), so it
+may be cached, shared and handed to Gemini. Google Maps content (live Air
+Quality, Street View metadata) comes from ``google_view`` and goes straight to
+the person's screen, beside a Google basemap.
 """
 from __future__ import annotations
 
@@ -11,7 +16,7 @@ import time
 
 from ..geo import bearing_deg, compass, haversine_km
 from ..registry import CITIES, authority_for_country, languages_for_country
-from ..sources import cache, gibs, google, openmeteo
+from ..sources import cache, gibs, google, nominatim, openmeteo
 from . import datahub, federated
 from .naqi import LABELS, category_for, index_for, rolling_mean, stage_for
 
@@ -41,8 +46,8 @@ async def intel(lat: float, lon: float) -> dict:
 
 
 async def _intel(lat: float, lon: float) -> dict:
-    geo, aq_now, sv, pts, fires, sensors, stations = await asyncio.gather(
-        google.reverse_geocode(lat, lon), google.aq_current(lat, lon), google.streetview_meta(lat, lon),
+    geo, pts, fires, sensors, stations = await asyncio.gather(
+        nominatim.reverse(lat, lon),
         _point_series(lat, lon), datahub.fires(), datahub.citizen_sensors(), datahub.stations())
     cc = geo.get("country") or ""
     near_city, near_km = _nearest_city(lat, lon)
@@ -122,7 +127,6 @@ async def _intel(lat: float, lon: float) -> dict:
         "place": {"address": geo.get("address"), "locality": geo.get("locality"), "district": geo.get("district"),
                   "state": geo.get("state"), "country": cc,
                   "nearest_city": near_city.name, "nearest_city_id": near_city.id, "nearest_city_km": round(near_km)},
-        "google_aq": aq_now,
         "forecast": {"now": now, "series": series, "source": "CAMS global forecast (Open-Meteo), bias-corrected by the Model Commons"},
         "weather": weather,
         "fires": {"within_50km": len(near_fires), "nearest": near_fires[:8],
@@ -130,11 +134,20 @@ async def _intel(lat: float, lon: float) -> dict:
         "citizen_sensors": {"count": len(cit), "median_pm25": cit_pm[len(cit_pm) // 2] if cit_pm else None,
                             "nearest": cit[:5], "source": "Sensor.Community (low-cost, uncalibrated)"},
         "stations": {"count": len(off), "nearest": off[:5], "source": "OpenAQ" if stations else None},
-        "imagery": {"satellite": gibs.recent(lat, lon),
-                    "streetview": ({"available": True, "date": sv.get("date"), "lat": sv["location"]["lat"],
-                                    "lon": sv["location"]["lng"], "pano": sv.get("pano_id"),
-                                    "official": "google" in (sv.get("copyright") or "").lower()}
-                                   if sv.get("location") else {"available": False})},
+        "imagery": {"satellite": gibs.recent(lat, lon), "streetview": {"available": False}},
         "languages": langs[:4],
         "authority": authority_for_country(cc, geo.get("state")),
     }
+
+
+async def google_view(lat: float, lon: float) -> dict:
+    """Google Maps content for one person's screen: live Air Quality (cached ≤ 10 min,
+    the terms allow one hour) and the nearest outdoor Street View pano ID."""
+    async def fetch():
+        aq, sv = await asyncio.gather(google.aq_current(lat, lon), google.streetview_meta(lat, lon))
+        return {"google_aq": aq,
+                "streetview": ({"available": True, "date": sv.get("date"), "pano": sv.get("pano_id"),
+                                "lat": sv["location"]["lat"], "lon": sv["location"]["lng"],
+                                "official": "google" in (sv.get("copyright") or "").lower()}
+                               if sv.get("location") else {"available": False})}
+    return await cache.cached(f"gview:{round(lat, 3)}:{round(lon, 3)}", 600, fetch, swr=False)

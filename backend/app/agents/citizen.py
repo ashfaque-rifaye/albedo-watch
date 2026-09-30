@@ -15,7 +15,7 @@ from .. import llm
 from ..engines import attribution, datahub
 from ..geo import haversine_km
 from ..registry import CITIES, STATES, authority_for, is_india, languages_for_country, region_name
-from ..sources import google
+from ..sources import nominatim
 from ..store import store
 
 SOURCE_TYPES = ["crop_residue_burning", "waste_burning", "construction_dust", "road_dust", "industrial_emission",
@@ -90,7 +90,7 @@ async def analyze(*, lat: float, lon: float, text: str, lang: str | None,
     pm_here = None
     if series:
         pm_here = series["pm25"][datahub.now_index(series["time"])]
-    geo = await google.reverse_geocode(lat, lon)
+    geo = await nominatim.reverse(lat, lon)
 
     context = (
         f"Location: {lat:.4f}, {lon:.4f} ({geo.get('address') or f'near {city.name}'}).\n"

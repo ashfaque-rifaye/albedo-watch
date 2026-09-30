@@ -106,6 +106,7 @@ function HubCard({ ctx }: { ctx: Ctx }) {
       <div className="card hub-cta">
         <div className="display" style={{ fontSize: 22, lineHeight: 1.15 }}>What are you breathing right now?</div>
         <p className="muted" style={{ margin: 0, fontSize: 13.5 }}>Use your location to set your hub: live measured air at your locality, a 24-hour forecast, and alerts for your area.</p>
+        <p className="fine" style={{ margin: 0 }}>Your location is used to fetch air data (Google Maps, Copernicus, OpenAQ) and is kept only in this browser unless you turn on alerts. <a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></p>
         <div className="btn-row">
           <button className="btn btn-primary btn-sm" disabled={ctx.locating} onClick={ctx.locateMe}>{ctx.locating ? 'Locating…' : '⌖ Use my location'}</button>
           <select className="select" value={ctx.country ?? ''} onChange={(e) => ctx.setCountry(e.target.value || null)} aria-label="Choose country">
@@ -118,7 +119,7 @@ function HubCard({ ctx }: { ctx: Ctx }) {
   }
   const i = h.intel
   if (!i) return <div className="card hub"><Loading lines={3} label="Reading the air at your hub…" /></div>
-  const g = i.google_aq, local = g.indexes?.find((x) => x.code !== 'uaqi'), uaqi = g.indexes?.find((x) => x.code === 'uaqi')
+  const g = (ctx.googleOn && i.google_aq) || {}, local = g.indexes?.find((x) => x.code !== 'uaqi'), uaqi = g.indexes?.find((x) => x.code === 'uaqi')
   const f = i.forecast
   const strip = f.series ? f.series.level.slice(f.series.now_offset, f.series.now_offset + 25).filter((_, k) => k % 3 === 0) : []
   const name = i.place.locality || i.place.district || i.place.nearest_city
@@ -132,6 +133,7 @@ function HubCard({ ctx }: { ctx: Ctx }) {
           : f.now.index != null ? <div className="big-idx" style={{ ['--c' as string]: f.now.category?.color ?? '#9ccc3a' }}><b className="display">{f.now.index}</b><span>{f.now.system} · forecast model</span><em>{f.now.category?.label}</em></div> : null}
         {uaqi && <div className="big-idx small" style={{ ['--c' as string]: uaqi.color ?? '#9ccc3a' }}><b className="display">{uaqi.aqi}</b><span>Universal AQI</span><em>{uaqi.category}</em></div>}
       </div>
+      {local && <div className="gattr">Air quality data: Google Maps</div>}
       {strip.length > 0 && (
         <div>
           <div className="eyebrow" style={{ marginBottom: 4 }}>Next 24 h · every 3 h</div>
@@ -438,25 +440,24 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
   const pl = ctx.place
   const [d, setD] = useState<PlaceIntel | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const [svOk, setSvOk] = useState(true)
   const [big, setBig] = useState<string | null>(null)
   const [sv360, setSv360] = useState(false)
   const elapsed = useElapsed(!!pl && !d && !err)
   useEffect(() => {
     if (!pl) return
-    setD(null); setErr(null); setSvOk(true)
-    api.place(pl.lat, pl.lon).then(setD).catch((e) => setErr((e as Error).message))
-  }, [pl?.lat, pl?.lon]) // eslint-disable-line react-hooks/exhaustive-deps
+    setD(null); setErr(null)
+    api.place(pl.lat, pl.lon, ctx.googleOn).then(setD).catch((e) => setErr((e as Error).message))
+  }, [pl?.lat, pl?.lon, ctx.googleOn]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!pl) return <p className="lede">Click anywhere on the globe to see what is in the air there right now.</p>
   if (err) return <div className="err">{err}</div>
-  if (!d) return <div className="stack"><div className="mono muted" style={{ fontSize: 12 }}>{pl.lat.toFixed(4)}, {pl.lon.toFixed(4)}</div><Loading lines={7} label={`Querying Google Air Quality, NASA, CAMS and ground sensors… ${elapsed}s`} /></div>
-  const g = d.google_aq, local = g.indexes?.find((i) => i.code !== 'uaqi'), uaqi = g.indexes?.find((i) => i.code === 'uaqi')
+  if (!d) return <div className="stack"><div className="mono muted" style={{ fontSize: 12 }}>{pl.lat.toFixed(4)}, {pl.lon.toFixed(4)}</div><Loading lines={7} label={`Querying ${ctx.googleOn ? 'Google Maps, ' : ''}NASA, CAMS, OpenAQ and ground sensors… ${elapsed}s`} /></div>
+  const g = (ctx.googleOn && d.google_aq) || {}, local = g.indexes?.find((i) => i.code !== 'uaqi'), uaqi = g.indexes?.find((i) => i.code === 'uaqi')
   const f = d.forecast.now
   const name = d.place.locality || d.place.district || d.place.nearest_city
   const sv = d.imagery.streetview
   const c3 = ctx.city3d && Math.abs(ctx.city3d.lat - d.lat) < 1e-6 && Math.abs(ctx.city3d.lon - d.lon) < 1e-6 ? ctx.city3d : null
   const key = ctx.meta?.maps_browser_key
-  const svUrl = sv.available && key ? `https://www.google.com/maps/embed/v1/streetview?key=${key}&${sv.pano ? `pano=${sv.pano}` : `location=${sv.lat},${sv.lon}&source=outdoor`}&heading=0&pitch=0&fov=90` : null
+  const svUrl = ctx.googleOn && sv.available && key ? `https://www.google.com/maps/embed/v1/streetview?key=${key}&${sv.pano ? `pano=${sv.pano}` : `location=${sv.lat},${sv.lon}&source=outdoor`}&heading=0&pitch=0&fov=90` : null
   return (
     <div className="stack">
       <div>
@@ -466,7 +467,7 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
       </div>
       <div className="btn-row">
         <button className={`btn btn-sm ${c3 ? 'btn-primary' : 'btn-ghost'}`} onClick={() => (c3 ? ctx.exit3D() : ctx.enter3D(d.lat, d.lon, { intel: d, label: name }))}>◳ {c3 ? 'Exit 3D' : '3D city'}</button>
-        {sv.available && key && <button className="btn btn-ghost btn-sm" onClick={() => setSv360(true)}>◉ Street View 360°</button>}
+        {svUrl && <button className="btn btn-ghost btn-sm" onClick={() => setSv360(true)}>◉ Street View 360°</button>}
         <button className="btn btn-ghost btn-sm" onClick={() => ctx.track(d.lon, d.lat, name)}>⌖ Track</button>
         <button className="btn btn-ghost btn-sm" onClick={() => ctx.flyTo(d.lon, d.lat, 60000, -60)}>Zoom out</button>
         <button className="btn btn-ghost btn-sm" onClick={() => { ctx.setPick({ lat: d.lat, lon: d.lon }); ctx.setMode('citizen') }}>✦ Report here</button>
@@ -476,7 +477,7 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
           <div className="sec-h"><h3>3D city</h3><span className="muted">{c3.mode === 'model' ? 'OpenStreetMap building model' : 'Google Photorealistic 3D'}</span></div>
           <div className="seg wide">
             <button className={c3.mode === 'model' ? 'on' : ''} onClick={() => ctx.enter3D(d.lat, d.lon, { intel: d, label: name, mode: 'model' })}>Building model</button>
-            <button className={c3.mode === 'photoreal' ? 'on' : ''} onClick={() => ctx.enter3D(d.lat, d.lon, { intel: d, label: name, mode: 'photoreal' })}>Google photoreal</button>
+            {ctx.googleOn && <button className={c3.mode === 'photoreal' ? 'on' : ''} onClick={() => ctx.enter3D(d.lat, d.lon, { intel: d, label: name, mode: 'photoreal' })}>Google photoreal</button>}
           </div>
           {c3.mode === 'model' && (c3.loading ? <div className="muted" style={{ fontSize: 13 }}>Loading building footprints from OpenStreetMap…</div>
             : c3.err ? <div className="err">{c3.err}</div>
@@ -493,8 +494,9 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
           </label>
         </section>
       )}
+      {ctx.googleOn ? (
       <section className="card live">
-        <div className="sec-h"><h3>Right now · measured</h3><span className="muted">Google Air Quality</span></div>
+        <div className="sec-h"><h3>Right now · measured</h3><span className="gattr">Google Maps</span></div>
         {local || uaqi ? (
           <div className="live-row">
             {local && <div className="big-idx" style={{ ['--c' as string]: local.color ?? '#9ccc3a' }}><b className="display">{local.aqi}</b><span>{local.name}</span><em>{local.category}</em></div>}
@@ -504,6 +506,18 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
         {g.pollutants && <div className="pol-row">{Object.entries(g.pollutants).slice(0, 6).map(([k, v]) => <span key={k} className="chip mono">{v.name ?? k} {fmt(v.value, 1)}</span>)}</div>}
         {g.health && <p className="fine" style={{ color: 'var(--ink-2)' }}>{g.health}</p>}
       </section>
+      ) : (
+      <section className="card live">
+        <div className="sec-h"><h3>Right now · official monitors</h3><span className="muted">OpenAQ</span></div>
+        {d.stations.nearest.length ? (
+          <div className="live-row">
+            <div className="big-idx" style={{ ['--c' as string]: f.category?.color ?? '#9ccc3a' }}><b className="display">{fmt(d.stations.nearest[0].pm25, 0)}</b><span>PM2.5 µg/m³ · {d.stations.nearest[0].km} km away</span><em>{d.stations.nearest[0].age_min} min ago</em></div>
+            {f.index != null && <div className="big-idx small" style={{ ['--c' as string]: f.category?.color ?? '#9ccc3a' }}><b className="display">{f.index}</b><span>{f.system} · forecast now</span><em>{f.category?.label}</em></div>}
+          </div>
+        ) : <div className="muted" style={{ fontSize: 13 }}>No official monitor within 25 km: the forecast below is the best estimate here.</div>}
+        <p className="fine">Open-data map mode: Google content is switched off. Choose Satellite or Dark for Google's live air quality and Street View.</p>
+      </section>
+      )}
       <div className="kv-grid">
         <div><span>Wind</span><b className="mono">{fmt(d.weather.wind_kmh, 0)} km/h from {d.weather.wind_from_compass ?? '—'}</b></div>
         <div><span>Temperature · humidity</span><b className="mono">{fmt(d.weather.temp_c, 0)}°C · {fmt(d.weather.rh, 0)}%</b></div>
@@ -533,15 +547,7 @@ export function PlacePanel({ ctx }: { ctx: Ctx }) {
           <iframe className="sv-frame" src={svUrl} title="Google Street View" loading="lazy" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
           <p className="fine">Google Street View nearest to this point · captured {sv.date} (not live) · drag to look around.</p>
         </section>
-      ) : svOk && (
-        <section>
-          <div className="sec-h"><h3>Street level</h3><span className="muted">Google Street View · {sv.date}</span></div>
-          <figure className="shot wide" onClick={() => setBig(`/api/streetview?lat=${sv.lat}&lon=${sv.lon}`)}>
-            <img src={`/api/streetview?lat=${sv.lat}&lon=${sv.lon}`} alt="Street View near this point" loading="lazy" onError={() => setSvOk(false)} />
-            <figcaption>Nearest imagery · captured {sv.date} (not live)</figcaption>
-          </figure>
-        </section>
-      ))}
+      ) : null)}
       {d.fires.nearest.length > 0 && (
         <section>
           <div className="sec-h"><h3>Nearest heat detections</h3><span className="muted">NASA FIRMS, 24 h</span></div>
@@ -582,7 +588,7 @@ export function CitizenPanel({ ctx }: { ctx: Ctx }) {
   const [err, setErr] = useState<string | null>(null)
   const [result, setResult] = useState<Report | null>(null)
   const rec = useRef<MediaRecorder | null>(null)
-  const steps = ['Uploading evidence', 'Gemini reads the photo & listens to the voice note', 'Cross-checking NASA heat detections nearby', 'Checking other reports & forecast PM2.5', 'Resolving jurisdiction (Google Maps)', 'Tracing where the smoke goes next']
+  const steps = ['Uploading evidence', 'Gemini reads the photo & listens to the voice note', 'Cross-checking NASA heat detections nearby', 'Checking other reports & forecast PM2.5', 'Resolving jurisdiction (OpenStreetMap)', 'Tracing where the smoke goes next']
   const at = useSteps(busy, steps, 1900)
   const elapsed = useElapsed(busy)
   const selected = ctx.reports.find((r) => r.id === ctx.selectedReport)
@@ -625,6 +631,7 @@ export function CitizenPanel({ ctx }: { ctx: Ctx }) {
   return (
     <div className="stack">
       <p className="lede">Anyone, anywhere, can be a sensor. Snap a photo or speak in your own language — Gemini works out what's burning, satellites check it, and it reaches the official who can stop it.</p>
+      <p className="fine notice">Your photo, voice note and text are analysed by Google Gemini, and the report (a small thumbnail, the location and the AI summary) is shown to other users on the map. Please leave out faces, names and other personal details. For adults (18+). <a href="/privacy" target="_blank" rel="noreferrer">Privacy</a></p>
       <div className="capture">
         <label className="cap-tile">
           <input type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => setPhotos([...(e.target.files ?? [])].slice(0, 3))} />
@@ -863,7 +870,7 @@ function AlertView({ ctx, a, onBack, onUpdate }: { ctx: Ctx; a: Alert; onBack: (
         <section>
           <div className="sec-h"><h3>Evidence attached</h3><span className="muted">live imagery</span></div>
           <div className="img-row">
-            {a.evidence.map((e, i) => (
+            {a.evidence.filter((e) => e.kind !== 'streetview').map((e, i) => (
               <figure key={i} className="shot" onClick={() => setBig(e.url)}>
                 <img src={e.url} alt={e.source} loading="lazy" />
                 <figcaption>{e.kind === 'satellite' ? `NASA VIIRS · ${e.date}` : `Street View · ${e.date ?? ''}`}</figcaption>

@@ -132,3 +132,6 @@
   .stack-grid { grid-template-columns: 1fr; }
   .lfoot-in { flex-direction: column; gap: 14px; }
 }
+
+.lfoot-links { margin-top: 8px !important; }
+.lfoot-links a { color: var(--ink-3, #a9b5c5); }

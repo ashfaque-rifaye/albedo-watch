@@ -46,6 +46,15 @@ class Store:
                 log.warning("firestore write failed (%s)", type(exc).__name__)
         return doc
 
+    def delete(self, coll: str, doc_id: str) -> None:
+        with self._lock:
+            self._mem[coll].pop(doc_id, None)
+        if self._fs is not None:
+            try:
+                self._fs.collection(coll).document(doc_id).delete()
+            except Exception as exc:
+                log.warning("firestore delete failed (%s)", type(exc).__name__)
+
     def get(self, coll: str, doc_id: str) -> dict | None:
         with self._lock:
             if doc_id in self._mem[coll]:

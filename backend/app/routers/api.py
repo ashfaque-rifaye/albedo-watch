@@ -20,7 +20,7 @@ from ..engines import attribution, datahub, federated, forecast, hotspots, place
 from ..engines import health as health_value
 from ..engines.naqi import category, grap_stage
 from ..registry import CITY_BY_ID, COUNTRIES, LANGUAGE_NAMES, STATES, WORLD_COUNTRIES, languages_for_country, languages_of
-from ..sources import cache, gibs, google, news, osm
+from ..sources import cache, gibs, news, osm
 from ..store import store
 
 log = logging.getLogger("albedo.api")
@@ -73,8 +73,11 @@ async def meta():
             {"name": "CAMS global composition forecast (via Open-Meteo)", "use": "PM2.5, PM10, NO₂, SO₂, O₃, CO, dust — hourly, 4-day"},
             {"name": "NWP winds & boundary layer (via Open-Meteo)", "use": "wind field, ventilation index"},
             {"name": "NASA FIRMS VIIRS (S-NPP + NOAA-20)", "use": "active fires, last 48 h"},
-            {"name": "Google Air Quality API — history", "use": "station-fused ground truth for federated training"},
-            {"name": "Google Geocoding API", "use": "jurisdiction for reports & hotspots"},
+            {"name": "OpenAQ reference monitors", "use": "ground truth for federated training; official coverage map"},
+            {"name": "Google Air Quality API", "use": "live local index at a point, shown with Google attribution (display only)"},
+            {"name": "Google Map Tiles API", "use": "satellite basemap, labels and Photorealistic 3D Tiles"},
+            {"name": "Google Street View (Maps Embed API)", "use": "360° street imagery in the place panel"},
+            {"name": "OpenStreetMap (Nominatim, Overpass)", "use": "place names and jurisdiction; buildings, schools, hospitals"},
             {"name": f"Google {llm.model_label()}", "use": "multimodal evidence, attribution narrative, alert drafting, Q&A"},
             {"name": "Gemini TTS", "use": "voice advisories in Indian languages"},
         ],
@@ -325,6 +328,14 @@ class PushTestReq(BaseModel):
     endpoint: str = Field(max_length=800)
 
 
+@router.post("/push/unsubscribe")
+async def push_unsubscribe(req: PushTestReq):
+    """Turn alerts off: the subscription (endpoint, hub location, profile) is deleted."""
+    from ..engines import push
+    store.delete("push_subs", push.sub_id(req.endpoint))
+    return {"ok": True}
+
+
 @router.post("/push/test")
 async def push_test(req: PushTestReq):
     """Send this subscriber their hub's outlook right now (so people can see what an alert looks like)."""
@@ -402,18 +413,16 @@ async def sensors_feed():
 
 
 @router.get("/place")
-async def place_intel(lat: float, lon: float):
+async def place_intel(lat: float, lon: float, gm: int = Query(1, alias="google")):
+    """Open data for the point; with ``google=1`` (the app's Google-basemap modes) the
+    person's own view also gets Google's live Air Quality and a Street View pano ID."""
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):
         raise HTTPException(422, "invalid coordinates")
-    return await place.intel(lat, lon)
-
-
-@router.get("/streetview")
-async def streetview(lat: float, lon: float, heading: float | None = None):
-    img = await google.streetview_image(lat, lon, heading)
-    if not img:
-        raise HTTPException(404, "no Street View imagery near this point")
-    return Response(content=img, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+    p = await place.intel(lat, lon)
+    if not gm:
+        return p
+    g = await place.google_view(lat, lon)
+    return {**p, "google_aq": g["google_aq"], "imagery": {**p["imagery"], "streetview": g["streetview"]}}
 
 
 @router.get("/buildings")
@@ -694,14 +703,11 @@ async def draft(req: DraftReq):
         p = await place.intel(lat, lon)
         pl = p["place"]
         name = pl.get("locality") or pl.get("district") or pl.get("nearest_city")
-        g = p.get("google_aq") or {}
-        local = next((i for i in g.get("indexes", []) if i["code"] != "uaqi"), None)
         ctx = {
             "place": name, "state": pl.get("state"), "country": pl.get("country"), "address": pl.get("address"),
             "authority": f"District / municipal administration of {pl.get('district') or name} + {p['authority']}",
             "category": "hidden hotspot" if req.kind == "hotspot" else "location watch",
-            "live_air_quality_google": ({"index": local["name"], "value": local["aqi"], "category": local["category"]}
-                                        if local else None),
+            "nearest_reference_monitors": p["stations"]["nearest"][:3],
             "forecast": p["forecast"]["now"], "weather_now": p["weather"],
             "satellite_heat_detections_within_50km": p["fires"]["within_50km"],
             "nearest_detections": p["fires"]["nearest"][:4],
@@ -712,10 +718,6 @@ async def draft(req: DraftReq):
         }
         default_langs = p["languages"]
         target = {"kind": req.kind, "id": f"{lat:.4f},{lon:.4f}", "lat": lat, "lon": lon, "name": name}
-        if p["imagery"]["streetview"].get("available"):
-            sv = p["imagery"]["streetview"]
-            evidence_imgs.append({"kind": "streetview", "url": f"/api/streetview?lat={sv['lat']}&lon={sv['lon']}",
-                                  "date": sv.get("date"), "source": "Google Street View (live, not stored)"})
 
     if req.audience in ("schools", "hospitals") and req.kind == "city" and req.city:
         try:

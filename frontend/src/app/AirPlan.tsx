@@ -65,6 +65,14 @@ export function AirPlan({ intel, lat, lon, vapidKey }: { intel: PlaceIntel; lat:
       setPush('on'); setMsg('Alerts on. You will hear from us before the air here turns unhealthy for this profile.')
     } catch (e) { setPush('off'); setMsg(`Could not turn on alerts: ${(e as Error).message}`) }
   }
+  async function off() {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration('/')
+      const sub = await reg?.pushManager.getSubscription()
+      if (sub) { await api.pushUnsubscribe(sub.endpoint).catch(() => {}); await sub.unsubscribe() }
+      setPush('off'); setMsg('Alerts off. Your hub location and profile were deleted from our server.')
+    } catch (e) { setMsg(`Could not turn alerts off: ${(e as Error).message}`) }
+  }
   async function test() {
     const reg = await navigator.serviceWorker.getRegistration('/')
     const sub = await reg?.pushManager.getSubscription()
@@ -92,6 +100,7 @@ export function AirPlan({ intel, lat, lon, vapidKey }: { intel: PlaceIntel; lat:
         {push === 'on' ? (<>
           <span className="chip" style={{ color: '#7ff0b2' }}>🔔 Alerts on for this hub</span>
           <button className="btn btn-ghost btn-sm" onClick={test}>Send a test alert</button>
+          <button className="btn btn-ghost btn-sm" onClick={off}>Turn off</button>
         </>) : push === 'unsupported' ? <span className="muted" style={{ fontSize: 12 }}>This browser can't receive push alerts.</span>
           : push === 'denied' ? <span className="muted" style={{ fontSize: 12 }}>Notifications are blocked for this site in your browser settings.</span>
           : <button className="btn btn-primary btn-sm" disabled={push === 'busy'} onClick={subscribe}>{push === 'busy' ? 'Turning on…' : '🔔 Alert me before bad air'}</button>}

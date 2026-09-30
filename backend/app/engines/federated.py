@@ -2,7 +2,7 @@
 
 Problem: global forecasts (CAMS, ~40 km) systematically miss India's local
 reality — in either direction, differently in every airshed. Each state holds
-its own ground truth (here: Google AQ station-fused PM2.5) and must not be
+its own ground truth (here: OpenAQ reference-monitor PM2.5) and must not be
 forced to pool raw data. So:
 
 * every state node fits a local bias-correction model on its own data,
@@ -312,5 +312,5 @@ def model_card() -> dict:
         "config": m.config, "summary": m.summary, "trained_at": m.trained_at,
         "license": "CC-BY-4.0 (weights) — intended as a Digital Public Good",
         "intended_use": "Correct global CAMS PM2.5 forecasts toward local station reality — Indian states and countries worldwide.",
-        "limitations": "72 h training window per node; linear model; Google AQ history used as station-fused truth proxy.",
+        "limitations": "Up to 72 h of overlap per node (reference data can lag by a day); linear model; truth = median of the nearest OpenAQ reference monitors (≤25 km). No Google Maps content is used to train or test.",
     }
