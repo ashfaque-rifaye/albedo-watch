@@ -1,11 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Alert, Attribution, BuildingSet, City, Commons, Corridor, FireFeed, Hotspot, Hotspots, LiveEvent, Meta, PlaceIntel, Pulse, Report, Sensors, WindVec } from '../lib/api'
+import type { Alert, Attribution, BuildingSet, LiveItem, City, Commons, Corridor, FireFeed, Hotspot, Hotspots, LiveEvent, Meta, PlaceIntel, Pulse, Report, Sensors, WindVec } from '../lib/api'
 import { api } from '../lib/api'
 import { fmt, istTime } from '../lib/format'
 import { Logo, Wordmark } from '../components/Logo'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import type { FlyTarget, GlobeLayers, Lens, Theme, Track } from './Globe'
 import { Coach, EventFeed, Hud, Legend, TourCaption } from './hud'
+import { LiveDetail, LiveToasts } from './LiveToasts'
 import { AskDrawer, CitizenPanel, CommandPanel, CommonsPanel, DetectPanel, ForecastPanel, PlacePanel, PulsePanel, TracePanel } from './panels'
 import './app.css'
 
@@ -136,6 +137,9 @@ export default function MissionControl() {
   const [trackT, setTrackT] = useState<Track>(null)
   const [city3d, setCity3dRaw] = useState<City3D | null>(null)
   const [coach, setCoach] = useState(() => { try { return !localStorage.getItem('aw-onboarded') } catch { return false } })
+  const [ping, setPing] = useState<{ lat: number; lon: number; t0: number } | null>(null)
+  const [liveOn, setLiveOn] = useState(() => { try { return localStorage.getItem('aw-live') !== 'off' } catch { return true } })
+  const [liveItem, setLiveItem] = useState<LiveItem | null>(null)
   const [tapped, setTapped] = useState(() => { try { return !!localStorage.getItem('aw-tapped') } catch { return true } })
   const [layers, setLayers] = useState<GlobeLayers>({ wind: true, fires: true, cities: true, hotspots: true, reports: true, sensors: true,
     corridors: false, aq: false, photoreal: false, sunlight: true })
@@ -363,13 +367,13 @@ export default function MissionControl() {
           cities={cities} frameLevel={frame?.level ?? null} wind={wind}
           fireBins={fireFeed?.bins ?? []} fireDets={fireDets?.fires ?? null}
           citizen={sensors?.citizen ?? []} stations={sensors?.stations ?? []}
-          hotspots={hotspots?.hotspots ?? []} reports={reports} corridors={corridors}
+          hotspots={mode === 'detect' || tour ? hotspots?.hotspots ?? [] : []} reports={reports} corridors={corridors}
           trajectories={attribution?.paths ?? null} clusters={attribution?.clusters ?? []} plume={plume}
           network={network} selectedCity={selectedCity} selectedReport={selectedReport}
           pick={pick} hub={hub ? { lat: hub.lat, lon: hub.lon } : null} theme={theme}
           layers={city3d?.mode === 'photoreal' ? { ...layers, photoreal: true } : layers}
           buildings={city3d?.mode === 'model' ? city3d.b : null} buildingTint={city3d?.tint ?? null}
-          haze={city3d?.haze ? city3d.ext : null}
+          haze={city3d?.haze ? city3d.ext : null} ping={ping}
           lens={lens} hud={hud} autoPhotoreal={!mobile} track={trackT} flyTo={fly}
           onCity={(id) => { selectCity(id, true); if (mode !== 'trace' && mode !== 'command') setMode('pulse') }}
           onHotspot={onHotspot}
@@ -491,8 +495,15 @@ export default function MissionControl() {
         <button className="glass" title="Forecast replay" onClick={() => { setReplay(true); setFrameIdx(nowIdx); setPlaying(true) }}>◷</button>
         <button className="glass" title="Guided flight" onClick={() => (tour ? stopTour() : startTour())}>{tour ? '■' : '▶'}</button>
         <button className="glass show-m" title="Legend" onClick={() => setLegendOpen(true)}>i</button>
+        <button className={`glass ${liveOn ? 'on' : ''}`} title={liveOn ? 'Live reports on — tap to mute' : 'Live reports muted — tap to turn on'}
+          onClick={() => { const v = !liveOn; setLiveOn(v); try { localStorage.setItem('aw-live', v ? 'on' : 'off') } catch { /* private mode */ } }}>{liveOn ? '◉' : '○'}</button>
         <button className="glass" title="Quick tour of the controls" onClick={() => setCoach(true)}>?</button>
       </div>
+      <LiveToasts enabled={liveOn && !coach && !tour && !askOpen} country={country}
+        onPing={(it) => setPing({ lat: it.lat, lon: it.lon, t0: performance.now() })}
+        onOpen={(it) => { setLiveItem(it); setPing({ lat: it.lat, lon: it.lon, t0: performance.now() }); flyTo(it.lon, it.lat, it.kind === 'satellite' ? 60000 : 90000, -55) }} />
+      {liveItem && <LiveDetail it={liveItem} onClose={() => setLiveItem(null)}
+        onReport={(id) => { setSelectedReport(id); setMode('citizen') }} onPlace={(la, lo) => openPlace(la, lo)} />}
       {coach && pulse && <Coach onDone={() => { setCoach(false); try { localStorage.setItem('aw-onboarded', '1') } catch { /* private mode */ } }} />}
       {!coach && !tapped && !tour && mode === 'pulse' && pulse && (
         <div className="tap-hint glass"><span className="tap-dot" />{mobile ? 'Tap' : 'Click'} anywhere on Earth to see the air there right now</div>

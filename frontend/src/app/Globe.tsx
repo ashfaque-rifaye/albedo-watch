@@ -46,6 +46,8 @@ export type GlobeProps = {
   buildingTint: string | null
   /** Aerosol light extinction near the ground, per metre (from measured PM2.5 + humidity); null = no haze */
   haze: number | null
+  /** A place a live notification is about: rings pulse there for a few seconds */
+  ping: { lat: number; lon: number; t0: number } | null
   track: Track
   flyTo: FlyTarget | null
   onCity: (id: string) => void
@@ -175,6 +177,7 @@ export default function Globe(p: GlobeProps) {
   const sampler = useRef<ReturnType<typeof makeSampler>>(null)
   const particles = useRef<Particle[]>([])
   const arcs = useRef<Cesium.Cartesian3[][]>([])
+  const tagOrder = useRef<City[]>([])
   const idle = useRef(true)
   const orbit = useRef<{ center: Cesium.Cartesian3; heading: number; pitch: number; range: number } | null>(null)
   const themeGen = useRef(0)
@@ -470,20 +473,17 @@ export default function Globe(p: GlobeProps) {
       const color = LEVEL_COLORS[Math.max(0, lvl)] ?? '#6b7280'
       const pos = at(c.lon, c.lat, 30)
       const sel = c.id === p.selectedCity
-      glow.add({ position: pos, pixelSize: 12 + Math.sqrt(c.pop_m) * 3.2, color: col(color, 0.2), disableDepthTestDistance: DDT,
-        scaleByDistance: new Cesium.NearFarScalar(3e5, 1.0, 1.5e7, 0.6), translucencyByDistance: new Cesium.NearFarScalar(4e4, 0, 2.5e5, 1) })
-      pts.add({ position: pos, pixelSize: (sel ? 11 : 7) + Math.sqrt(c.pop_m) * 0.9, color: col(color),
-        outlineColor: sel ? Cesium.Color.WHITE : col('#05070b'), outlineWidth: sel ? 2.5 : 1.5, disableDepthTestDistance: DDT,
+      glow.add({ position: pos, pixelSize: 9 + Math.sqrt(c.pop_m) * 2.2, color: col(color, 0.13), disableDepthTestDistance: DDT,
+        scaleByDistance: new Cesium.NearFarScalar(3e5, 1.0, 1.5e7, 0.55), translucencyByDistance: new Cesium.NearFarScalar(4e4, 0, 2.5e5, 1) })
+      pts.add({ position: pos, pixelSize: (sel ? 9 : 5) + Math.sqrt(c.pop_m) * 0.6, color: col(color, 0.95),
+        outlineColor: sel ? Cesium.Color.WHITE : col('#05070b', 0.7), outlineWidth: sel ? 2 : 1, disableDepthTestDistance: DDT,
         scaleByDistance: new Cesium.NearFarScalar(3e5, 1.0, 1.5e7, 0.7), translucencyByDistance: new Cesium.NearFarScalar(6e3, 0, 3e4, 1),
         id: { kind: 'city', id: c.id, label: `${c.name}, ${c.india ? c.state_name : c.country_name} · ${c.index_system} ${c.naqi ?? '—'} (${c.category.label})` } as Tag })
-      const tagText = sel ? `${c.name} · ${c.naqi ?? '—'}` : c.naqi != null ? String(c.naqi) : ''
-      if (!tagText) continue // an empty label has zero width and would crash Cesium's renderer
-      labels.add({ position: pos, text: tagText,
-        font: '700 12px "JetBrains Mono", monospace', fillColor: col('#0b0d12'),
-        showBackground: true, backgroundColor: col(color, 0.92), backgroundPadding: new Cesium.Cartesian2(5, 3),
-        pixelOffset: new Cesium.Cartesian2(10, -12), horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
-        disableDepthTestDistance: DDT, distanceDisplayCondition: new Cesium.DistanceDisplayCondition(3e4, sel ? 3e7 : 4.2e6) })
     }
+    // tag priority for the decluttered overlay: selected, then worst air, then biggest cities
+    tagOrder.current = [...p.cities].filter((c) => c.naqi != null).sort((a, b) =>
+      (b.id === p.selectedCity ? 1 : 0) - (a.id === p.selectedCity ? 1 : 0)
+      || (p.frameLevel?.[b.id] ?? b.category.level) - (p.frameLevel?.[a.id] ?? a.category.level) || b.pop_m - a.pop_m)
   }, [p.cities, p.frameLevel, p.selectedCity, p.layers.cities, ready, gOffV]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -493,14 +493,14 @@ export default function Globe(p: GlobeProps) {
     if (!p.layers.fires) return
     if (p.fireDets) {
       for (const [lat, lon, frp, age] of p.fireDets) {
-        f.add({ position: at(lon, lat, 20), pixelSize: 3 + Math.min(6, Math.sqrt(frp) * 0.8),
-          color: col(fireColor(frp), age < 12 ? 0.95 : 0.6), outlineColor: col('#1a0800', 0.8), outlineWidth: 1, disableDepthTestDistance: DDT,
+        f.add({ position: at(lon, lat, 20), pixelSize: 2.5 + Math.min(4.5, Math.sqrt(frp) * 0.6),
+          color: col(fireColor(frp), age < 12 ? 0.9 : 0.55), outlineColor: col('#1a0800', 0.5), outlineWidth: 0.5, disableDepthTestDistance: DDT,
           id: { kind: 'fire', label: `NASA heat detection · ${frp.toFixed(1)} MW · ${age.toFixed(0)} h ago` } as Tag })
       }
     } else {
       for (const [lat, lon, n, , mx] of p.fireBins) {
-        f.add({ position: at(lon, lat, 20), pixelSize: 2 + Math.min(6, Math.sqrt(n) * 0.7),
-          color: col(fireColor(mx), 0.7), disableDepthTestDistance: DDT,
+        f.add({ position: at(lon, lat, 20), pixelSize: 1.5 + Math.min(3.5, Math.sqrt(n) * 0.45),
+          color: col(fireColor(mx), 0.55), disableDepthTestDistance: DDT,
           id: { kind: 'fire', label: `${n} NASA heat detection${n > 1 ? 's' : ''} in this ~100 km cell (24 h) · strongest ${mx} MW` } as Tag })
       }
     }
@@ -511,15 +511,15 @@ export default function Globe(p: GlobeProps) {
     if (!s) return
     s.removeAll()
     if (!p.layers.sensors) return
-    const vis = new Cesium.DistanceDisplayCondition(0, 6e6)
+    const vis = new Cesium.DistanceDisplayCondition(0, 2.5e6)  // a field of dots only once you are over a region
     for (const [lat, lon, pm, age] of p.citizen) {
-      s.add({ position: at(lon, lat, 8), pixelSize: 4, color: col(LEVEL_COLORS[pmLevel(pm)], 0.85),
+      s.add({ position: at(lon, lat, 8), pixelSize: 3, color: col(LEVEL_COLORS[pmLevel(pm)], 0.7),
         distanceDisplayCondition: vis, disableDepthTestDistance: DDT,
         id: { kind: 'sensor', label: `Citizen sensor · PM2.5 ${pm} µg/m³ · ${age} min ago (low-cost, uncalibrated)` } as Tag })
     }
     for (const [lat, lon, pm, age] of p.stations) {
-      s.add({ position: at(lon, lat, 8), pixelSize: 7, color: col(LEVEL_COLORS[pmLevel(pm)]),
-        outlineColor: Cesium.Color.WHITE, outlineWidth: 1.5, distanceDisplayCondition: vis, disableDepthTestDistance: DDT,
+      s.add({ position: at(lon, lat, 8), pixelSize: 6, color: col(LEVEL_COLORS[pmLevel(pm)]),
+        outlineColor: col('#ffffff', 0.85), outlineWidth: 1.2, distanceDisplayCondition: vis, disableDepthTestDistance: DDT,
         id: { kind: 'station', label: `Official monitor · PM2.5 ${pm} µg/m³ · ${age} min ago (OpenAQ reference monitor)` } as Tag })
     }
   }, [p.citizen, p.stations, p.layers.sensors, ready, gOffV]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -698,18 +698,38 @@ export default function Globe(p: GlobeProps) {
           prev = a
         }
       }
-      g.lineWidth = 1.2; g.lineCap = 'round'
-      buckets.forEach((b, i) => { g.strokeStyle = `rgba(140,232,255,${0.12 + i * 0.13})`; g.stroke(b) })
+      g.lineWidth = 1; g.lineCap = 'round'
+      buckets.forEach((b, i) => { g.strokeStyle = `rgba(160,225,245,${0.06 + i * 0.09})`; g.stroke(b) })
     }
 
-    if (S.layers.cities) {
+    if (S.layers.cities && hgt > 25_000) {
       for (const c of S.cities) {
         if (!c.spike) continue
         const a = proj(c.lon, c.lat); if (!a) continue
-        const ph = ((((t / 1400) + c.lat) % 1) + 1) % 1
-        g.beginPath(); g.arc(a[0], a[1], 8 + ph * 24, 0, Math.PI * 2)
-        g.strokeStyle = `rgba(240,138,36,${0.8 * (1 - ph)})`; g.lineWidth = 1.6; g.stroke()
+        const ph = ((((t / 2200) + c.lat) % 1) + 1) % 1
+        g.beginPath(); g.arc(a[0], a[1], 6 + ph * 16, 0, Math.PI * 2)
+        g.strokeStyle = `rgba(240,138,36,${0.55 * (1 - ph)})`; g.lineWidth = 1.1; g.stroke()
       }
+      // Value tags: few when far, more as you zoom in; never overlapping; worst air first.
+      const maxTags = hgt > 9e6 ? 12 : hgt > 3e6 ? 30 : hgt > 8e5 ? 60 : 120
+      const placed: [number, number, number, number][] = []
+      g.font = '600 10.5px Inter, system-ui, sans-serif'; g.textBaseline = 'middle'
+      for (const c of tagOrder.current) {
+        if (placed.length >= maxTags) break
+        const a = proj(c.lon, c.lat); if (!a) continue
+        const sel = c.id === S.selectedCity
+        const lvl = S.frameLevel?.[c.id] ?? c.category.level
+        const color = LEVEL_COLORS[Math.max(0, lvl)] ?? '#6b7280'
+        const text = sel || hgt < 1.5e6 ? `${c.name}  ${c.naqi}` : String(c.naqi)
+        const w = g.measureText(text).width + 20, h = 17, x = a[0] + 7, y = a[1] - h - 3
+        if (placed.some(([px, py, pw, ph2]) => x < px + pw + 3 && px < x + w + 3 && y < py + ph2 + 2 && py < y + h + 2)) continue
+        placed.push([x, y, w, h])
+        g.beginPath(); g.roundRect(x, y, w, h, 8.5); g.fillStyle = sel ? 'rgba(12,18,26,0.9)' : 'rgba(8,12,18,0.62)'; g.fill()
+        g.strokeStyle = sel ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.14)'; g.lineWidth = 1; g.stroke()
+        g.beginPath(); g.arc(x + 8, y + h / 2, 3, 0, Math.PI * 2); g.fillStyle = color; g.fill()
+        g.fillStyle = 'rgba(240,245,250,0.95)'; g.fillText(text, x + 14, y + h / 2 + 0.5)
+      }
+      g.textBaseline = 'alphabetic'
     }
     const comet = (paths: [number, number, number][][] | null, rgb: string, toEnd: boolean) => {
       for (const path of paths ?? []) {
@@ -757,13 +777,12 @@ export default function Globe(p: GlobeProps) {
       }
       let drawn = 0
       S.hotspots.forEach((hs, i) => {
-        if (drawn >= 8) return
+        if (drawn >= 5) return
         const a = proj(hs.lon, hs.lat); if (!a) return
         if (box(a[0], a[1], 20, 'rgba(240,150,255,0.95)', `HS-${String(i + 1).padStart(2, '0')} ${hs.fires} DET · ${hs.frp_max.toFixed(0)} MW`)) drawn++
       })
       for (const c of S.cities) {
-        if (drawn >= 18) break
-        if (!(c.spike || c.category.level >= 4 || c.id === S.selectedCity)) continue
+        if (c.id !== S.selectedCity) continue
         const a = proj(c.lon, c.lat); if (!a) continue
         if (box(a[0], a[1], 16, c.category.color, `${c.name.slice(0, 12).toUpperCase()} ${c.index_system === 'NAQI' ? 'NAQI' : 'AQI'} ${c.naqi ?? '—'}${c.spike ? ` ▲${c.spike.peak}` : ''}`)) drawn++
       }
@@ -779,6 +798,18 @@ export default function Globe(p: GlobeProps) {
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { g.beginPath(); g.moveTo(a[0] + dx * (r - 8), a[1] + dy * (r - 8)); g.lineTo(a[0] + dx * (r + 6), a[1] + dy * (r + 6)); g.stroke() }
         g.font = '600 10px "JetBrains Mono", monospace'; g.fillStyle = 'rgba(111,227,255,0.95)'
         g.fillText(`TRK ${S.track.label.toUpperCase()}`, a[0] + r + 8, a[1] - r)
+      }
+    }
+    if (S.ping) {
+      const age = (t - S.ping.t0) / 1000
+      const a = age < 8 ? proj(S.ping.lon, S.ping.lat) : null
+      if (a) {
+        for (let k = 0; k < 3; k++) {
+          const ph = ((age * 0.7 + k / 3) % 1)
+          g.beginPath(); g.arc(a[0], a[1], 5 + ph * 34, 0, Math.PI * 2)
+          g.strokeStyle = `rgba(255,255,255,${0.75 * (1 - ph) * Math.min(1, (8 - age) / 2)})`; g.lineWidth = 1.4; g.stroke()
+        }
+        g.beginPath(); g.arc(a[0], a[1], 4, 0, Math.PI * 2); g.fillStyle = '#ffffff'; g.fill()
       }
     }
     if (S.pick) {

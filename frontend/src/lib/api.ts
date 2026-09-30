@@ -126,6 +126,8 @@ export type Meta = {
 
 export type LiveEvent = { id: string; kind: 'spike' | 'fire' | 'report' | 'alert' | 'feed'; t: number; severity: number; title: string; sub: string
   lat?: number; lon?: number; city?: string; report?: string; alert?: string; country?: string | null }
+export type LiveItem = { id: string; kind: 'citizen' | 'news' | 'satellite'; t: number; title: string; image: string; source: string
+  lat: number; lon: number; place: string; url?: string; report?: string; country?: string | null }
 export type DraftBody = { kind: 'city' | 'hotspot' | 'report' | 'place'; city?: string; report_id?: string; lat?: number; lon?: number
   languages?: string[]; attach_imagery?: boolean; label?: string; suggested?: string[] }
 
@@ -155,6 +157,7 @@ export const api = {
   timeline: () => req<{ frames: { h: number; t: number; naqi: Record<string, number | null>; level: Record<string, number> }[] }>('/api/timeline'),
   overview: () => req<Overview>('/api/overview', undefined, 30000),
   sensors: () => req<Sensors>('/api/sensors'),
+  live: () => req<{ items: LiveItem[] }>('/api/live', undefined, 40000),
   events: (country?: string | null) => req<{ events: LiveEvent[] }>(`/api/events${country ? `?country=${country}` : ''}`),
   place: (lat: number, lon: number) => req<PlaceIntel>(`/api/place?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}`, undefined, 60000),
   corridors: () => req<{ corridors: Corridor[] }>('/api/corridors'),

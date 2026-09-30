@@ -257,7 +257,7 @@ def _synthetic(key: str):
         now = hrs[72]
         return [{"lat": 30.2 + 0.05 * k, "lon": 75.0 + 0.07 * k, "frp": 12.0 + k, "t": now - 3600 * (k % 20),
                  "conf": "n", "sensor": "synthetic", "day": True, "n": 1} for k in range(40)]
-    if key in ("sensors", "openaq", "openaq_sites"):
+    if key in ("sensors", "openaq", "openaq_sites", "news"):
         return []
     if key == "wind_global" or key.startswith("wind:"):
         return _synthetic("wind")

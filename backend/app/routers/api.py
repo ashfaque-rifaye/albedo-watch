@@ -19,7 +19,7 @@ from ..config import settings
 from ..engines import attribution, datahub, federated, forecast, hotspots, place, response
 from ..engines.naqi import category, grap_stage
 from ..registry import CITY_BY_ID, COUNTRIES, LANGUAGE_NAMES, STATES, WORLD_COUNTRIES, languages_for_country, languages_of
-from ..sources import cache, gibs, google, osm
+from ..sources import cache, gibs, google, news, osm
 from ..store import store
 
 log = logging.getLogger("albedo.api")
@@ -252,6 +252,57 @@ async def events(country: str | None = None, limit: int = Query(30, ge=1, le=80)
         out = [e for e in out if e.get("country") in (None, country)]
     out.sort(key=lambda e: (-(e["severity"] >= 3), -e["t"]))
     return {"events": out[:limit], "generated_at": now}
+
+
+_news_refresh: set[int] = set()
+
+
+async def _refresh_news():
+    try:
+        cache.put("news", await news.fetch_news())
+    except Exception as exc:  # the feed is a bonus: never fail over it
+        log.info("news feed unavailable (%s)", type(exc).__name__)
+    finally:
+        _news_refresh.clear()
+
+
+@router.get("/live")
+async def live(limit: int = Query(40, ge=1, le=80)):
+    """Real-time notifications with pictures, each pinned to a place: citizen reports submitted in
+    the app, news photos about smoke and fires (GDELT), and today's satellite view of new fires."""
+    now = time.time()
+    out: list[dict] = []
+    for r in store.list("reports", 20):
+        an, j, v = r.get("analysis", {}), r.get("jurisdiction", {}), r.get("verification", {})
+        if not r.get("thumb"):
+            continue
+        out.append({"id": f"rep:{r['id']}", "kind": "citizen", "t": r.get("created_at", now),
+                    "title": an.get("summary_en") or an.get("source_label") or "Citizen report",
+                    "image": r["thumb"], "source": f"Citizen report · {v.get('status', 'pending')}",
+                    "lat": r["lat"], "lon": r["lon"], "report": r["id"],
+                    "place": ", ".join(x for x in (j.get("locality"), j.get("state")) if x) or j.get("city", ""),
+                    "country": j.get("country_code")})
+    # News is refreshed in the background (GDELT allows one call per 5 s): never make a viewer wait on it.
+    age = cache.age_s("news")
+    if (age is None or age > 20 * 60) and not _news_refresh:
+        _news_refresh.add(1)
+        asyncio.get_running_loop().create_task(_refresh_news())
+    out += cache.peek("news") or []
+    for scope in ("india", "world"):
+        for h in ((cache.peek(f"hotspots:{scope}") or _snapshot(f"hotspots_{scope}") or {}).get("hotspots") or [])[:6]:
+            if not h.get("image"):
+                continue
+            where = (h.get("admin") or {}).get("district") or h["place"]["label"]
+            out.append({"id": f"sat:{h['lat']}:{h['lon']}", "kind": "satellite", "t": h.get("newest") or now - 3600,
+                        "title": f"{h['fires']} fires seen from orbit near {where}"
+                                 + (f" · CAMS PM2.5 {h['site_pm25']:.0f} µg/m³" if h.get("site_pm25") is not None else ""),
+                        "image": h["image"]["url"], "source": f"NASA VIIRS · {h['image']['date']}",
+                        "lat": h["lat"], "lon": h["lon"], "place": where, "country": (h.get("admin") or {}).get("country")})
+    seen, uniq = set(), []
+    for e in sorted(out, key=lambda e: -e["t"]):
+        if e["id"] not in seen:
+            seen.add(e["id"]); uniq.append(e)
+    return {"items": uniq[:limit], "generated_at": now}
 
 
 @router.get("/sensors")
