@@ -59,7 +59,7 @@ flowchart LR
     T --> F["Forecast<br/>72 h ahead, corrected<br/>by federated learning"]
     F --> P["Protect<br/>schools and hospitals<br/>in the smoke"]
     P --> A["Act<br/>Gemini drafts the order,<br/>a human approves"]
-    A -. "reports, outcomes" .-> S
+    A -.->|reports and outcomes| S
 ```
 
 One product serves three groups of people:
